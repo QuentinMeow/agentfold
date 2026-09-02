@@ -38,6 +38,30 @@ from it.
 The panel stopped after three independent blocks. The two remaining lenses were not run,
 and no production implementation began from this revision.
 
+## Superseded attempt-bound activation review
+
+**Reviewed revision:** `3ba7d9f54c7ad22761a5306a0a43035f51a00a59`
+
+- semantic/DAG / a15-semantic-review: `approve` — Strategy A remained accepted-POC
+  equivalent and no negative provider state could authorize classifier success.
+- workflow/provider / r19-semantic-design: `approve` — official GitHub run-attempt, jobs,
+  contexts, artifact, and upload/download source supported the attempt-specific job-log plus
+  raw-event/result evidence joins and the public-fork hold union.
+- CLI/resource / final-cli-panel: `block` — authenticated patch bytes did not bound expanded
+  blob/worktree/object-store bytes, scratch disk, or diff/apply children before materialization.
+  Its executable probe produced a 6,037,250-byte Git binary patch for a 1,073,741,824-byte
+  zero file, demonstrating the compression boundary.
+
+Budget and core-fit lenses were not run. Production remained unopened.
+
+The amendment-22 scratch arithmetic was executed directly:
+
+```text
+$ python3 -c 'raw=134217728; rows=256; n=raw+14*rows; loose=n+(n>>12)+(n>>14)+(n>>25)+13*rows+4095*rows; cats=[301989888,loose,16777216,2097152,4194304,2097152]; print(loose); print(sum(cats))'
+135313924
+462469636
+```
+
 ## Superseded preserved-status design review
 
 **Reviewed revision:** `92a5f3e61fd3e03009813bf6e49a842e422bf25f`

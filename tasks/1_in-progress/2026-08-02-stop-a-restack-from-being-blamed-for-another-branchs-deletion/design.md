@@ -3239,3 +3239,160 @@ reducing the patch limit.
 
 Production remains unopened. Budget and core-fit review do not inherit the semantic ACCEPT;
 all five lenses must review one new immutable revision before dormant implementation.
+
+## 2026-09-01 correction amendment 22 — bounded activation materialization
+
+Fresh review of `3ba7d9f54c7ad22761a5306a0a43035f51a00a59` accepted semantic and
+provider behavior and rejected activation resource closure. A Git binary patch can compress
+a one-GiB zero blob below the 16 MiB patch limit, so post-apply OID comparison cannot protect
+memory or disk. This amendment supersedes amendments 20–21's activation row, diff/apply
+execution, and resource tests. Attempt-bound receipt evidence, Strategy A semantics, and the
+26 MiB adapter transcript remain.
+
+### Blob size is authenticated before content is materialized
+
+Each activation path row now has exactly
+`path,before_mode,before_blob,before_size,after_mode,after_blob,after_size`. A present side's
+size is the decimal Git blob payload size `0..33,554,432`; an absent side has mode, blob, and
+size all JSON null. Both sides cannot be absent, and the two present/absent mode/OID/size
+tuples cannot be identical. Rows still count per path, so two paths referencing one blob
+charge its materialized size twice.
+
+There are at most 134,217,728 before bytes and 134,217,728 after bytes across all rows;
+their combined materialization charge is at most 268,435,456. Before patch generation and
+again before application, trusted code queries every OID through the sanitized, no-alternate,
+no-replacement, no-promisor object view using the centralized child launcher and exact
+`git cat-file --batch-check` grammar. Type must be `blob`, reported size must equal the
+manifest, every requested OID must return once in request order, and the per-path and three
+aggregate counters are precharged before any blob body, diff, checkout, or apply is read.
+Missing/corrupt objects, unexpected fetch, duplicate output, size drift, overflow, or a
+counter +1 makes the gate unavailable.
+
+Gate 2 accepts no supplied patch. It first proves these bounds against the exact before and
+candidate-after trees, then generates the patch itself. Gate 3 authenticates manifest and
+patch bytes from its immutable default-branch base, repeats size/type preflight against its
+base and the candidate ODB, and rejects patch/digest drift before invoking the parser or Git.
+A candidate cannot use a small manifest size to license a larger object or replace the
+canaried patch.
+
+### Binary inflation is parsed before Git apply
+
+After digest and size preflight, a bounded streaming parser validates the complete patch.
+It admits only Git's exact full-index text or `GIT binary patch` grammar for the sorted
+manifest paths, with no combined diff, rename/copy, submodule, quoted-path ambiguity, omitted
+index OID/mode, extra section, or unconsumed/trailing byte. Every header OID/mode and
+create/delete relation equals its manifest row.
+
+For each binary forward/reverse body, the parser decodes Git base85 and zlib incrementally,
+with one byte beyond the declared bound reserved only for overrun detection. A literal body
+must inflate to exactly its declared and corresponding target size. A delta body parses the
+source/target varints, requires them to equal the corresponding manifest sizes, checks every
+copy range against source size and every insert against available delta bytes, and charges
+the computed output before each instruction; its final output is exactly target size and at
+most the per-blob cap. Concatenated streams, dictionary requests, invalid/non-minimal lengths,
+integer overflow, unused compressed data, a second zlib member, checksum failure, premature
+EOF, and declared/actual mismatch refuse before `git apply`.
+
+Text hunks are not compressed: their entire added payload is already charged to the 16 MiB
+patch cap. The parser validates monotonically increasing non-overlapping hunk coordinates,
+old/new line counts, prefixes, and Git's exact no-final-newline marker. It streams the
+bounded before blob once, byte-counting unchanged/deleted/added segments without retaining a
+second full copy, and requires the computed output size to equal `after_size` before Git.
+An out-of-range coordinate, overlapping hunk, omitted source byte, or trailing source/hunk
+data refuses. Git remains the final text/delta semantics oracle; after application, exact
+mode/OID/size equality remains mandatory.
+
+Patch generation adds literal `--no-renames` to amendment 20's sanitized `git diff`
+argument sequence. Patch size is now `1..16,777,216`; a manifest has 1–256 changed rows, so
+zero-byte/no-op patches are invalid. The exact `git apply --binary --index
+--whitespace=nowarn <exact-file>` sequence remains, with no fuzz, three-way, recount,
+rejects, filters, hooks, or repair.
+
+### Activation children have their own closed resource envelope
+
+Activation preflight, diff, and apply use one direct child group at a time; none overlaps
+another activation child or a Strategy A classifier. The trusted parent is limited to
+268,435,456 address-space bytes and each child to 536,870,912, for a closed 805,306,368-byte
+address-space peak. Each child has a 60-second monotonic deadline and 34 MiB `RLIMIT_FSIZE`;
+the whole preflight/diff/parser/apply materialization phase has a 240-second monotonic
+deadline. Failure kills the registered process group, closes every descriptor, waits, and
+reaps before another stage.
+
+Each child uses the amendment-21 16-byte exec-status protocol plus stdout/stderr pipes whose
+kernel capacity is fixed and verified at 65,536 bytes. Batch-check stdout is capped at
+1 MiB, diff stdout at 16,777,217 bytes including its refusal sentinel, apply stdout at
+65,536 bytes, and every stderr at 1 MiB. Diff stdout streams directly into the quota-bound
+patch file while hashing and retains at most 65,536 bytes; byte 16,777,217 terminates the
+group and the file is never accepted. Apply reads the already authenticated
+patch file directly. Partial UTF-8 is irrelevant to patch bytes; diagnostics are retained as
+bounded opaque bytes and escaped only after failure.
+
+### Scratch storage is a required capability, not ambient disk
+
+Gate 2 and Gate 3 require a fresh private scratch-volume capability with a hard one-GiB
+(1,073,741,824-byte) per-run write quota, at least 536,870,912 usable bytes at start, no
+pre-existing entries, an exact 4,096-byte allocation unit, and no reach outside its root.
+The host adapter must prove quota enforcement independently (project quota, container volume,
+or equivalent); ordinary `statvfs` free-space observation is insufficient. If the host
+cannot provide this behavior, activation is unavailable. This requirement is provider-neutral
+and does not add a user-global installer or privileged fallback to core.
+
+Within that volume, trusted code also maintains an exact 462,469,636-byte logical ledger.
+Its independently refusing categories are:
+
+```text
+working-copy peak       before_total + after_total + max_changed_blob = 301,989,888
+loose-object ceiling    raw after bytes + per-row zlib/header/4KiB rounding = 135,313,924
+patch                   16,777,216
+manifest                 2,097,152
+index/path/journal        4,194,304
+retained child output     2,097,152
+```
+
+The working-copy formula reflects one-path-at-a-time replace: prior after files, remaining
+before files, and at most one new temporary blob coexist; after bytes are not charged twice.
+The loose-object logical charge per row is exactly
+`size + (size >> 12) + (size >> 14) + (size >> 25) + 13 + 14 + 4,095`.
+The fixed 14 bytes reserve the largest `blob <decimal-size>\0` header and the fixed 4,095
+reserve the worst 4,096-byte block rounding; together they dominate applying zlib's literal
+`compressBound` formula to the real header plus payload. The charge remains per path even
+when OIDs deduplicate. Its displayed ceiling is reachable as a charge with four 32 MiB rows
+and 252 zero-byte rows, and is checked by integer arithmetic rather than assumed allocation.
+Fanout directories and filesystem metadata, plus actual manifest, patch, path, journal,
+index, and output sizes, charge the 4 MiB metadata category before or at first byte; a
+category or aggregate +1 refuses. No category borrows from the hard-volume reserve. The
+one-GiB quota contains a Git defect or unexpected extra file; `RLIMIT_FSIZE` contains a
+single-file expansion; the logical ledger refuses a valid-but-overbudget plan before starting
+a child.
+
+The scratch root is opened fd-relative with no symlink traversal. Success and every failure
+remove all generated entries, close the volume capability, and verify the root is empty
+before release. `ENOSPC`, `EFBIG`, cleanup timeout, residual entry, mount/quota loss, or a
+child surviving group cleanup is infrastructure-unavailable and cannot publish activation.
+An interrupted local run leaves one authenticated run-ID tombstone; the next invocation may
+clean exactly that one bounded root after verifying ownership, otherwise it refuses rather
+than accumulating scratch state.
+
+The reconstructed-tree suite and guards also run inside this same hard-quota volume with
+`TMPDIR` and every repository-local cache rooted there. They inherit the existing test-runner
+process/deadline limits; quota exhaustion or an attempted write outside the capability makes
+activation unavailable. Test output and caches cannot become manifest evidence and are
+removed before the exact candidate-tree comparison.
+
+### Activation damage and boundary suite
+
+Cold-clone fixtures include: zero and 32 MiB blobs; per-blob +1; 128 MiB before/after
+aggregates and each +1; duplicate-blob paths charged twice; a highly compressible exact-limit
+blob; a sub-16-MiB patch that advertises or inflates to 64 MiB/1 GiB; literal and delta
+declared-size drift; delta copy/insert overflow; zlib/base85 exact/+1, concatenation, trailing
+data, and checksum damage; text added-byte expansion; patch 1/16 MiB/+1; every logical-ledger
+category; the exact 462,469,636 aggregate and +1; hard quota exhaustion; per-file
+`RLIMIT_FSIZE`; parent/child address-space failure; every stdout/stderr/status exact/+1;
+deadline/group escape; and cleanup after every stage. Generation rejects an oversized
+candidate before `git diff`; application rejects an authenticated-fixture damage patch before
+`git apply`; no test relies only on the final OID comparison.
+
+### Gate boundary
+
+Production remains unopened. The new immutable revision must again pass all five lenses
+before dormant implementation begins.

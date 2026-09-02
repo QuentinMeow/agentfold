@@ -387,3 +387,17 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Raised and partitioned the adapter transcript to a composable 26 MiB total: 16 MiB patch,
   2 MiB manifest, and 8 MiB reserved for all other mandatory bytes.
 - Production remains unopened pending another full five-lens immutable-revision review.
+
+## 2026-09-01 — Bounded activation-materialization correction (codex)
+
+- Semantic and real-provider review accepted amendment 21; CLI review proved a small Git
+  binary patch could inflate to an unbounded worktree before final OID validation.
+- Added authenticated per-blob sizes, 32 MiB per-blob and 128 MiB per-side materialization
+  bounds, pre-diff/pre-apply object-size checks, and a streaming Git binary delta parser.
+- Put activation preflight/diff/apply under one-group process, address-space, file-size,
+  pipe-output, monotonic-deadline, and cleanup bounds.
+- Required a provider-neutral hard one-GiB scratch-volume capability plus a separately
+  precharged 462,469,636-byte logical ledger; hosts without enforceable quota keep activation
+  closed.
+- Added compression-bomb, zlib/delta/text, scratch, resource, and cleanup exact/+1 tests.
+- Production remains unopened pending another full five-lens immutable-revision review.
