@@ -315,6 +315,27 @@ $ sed -n '/additional_parent_subprocess_queries=0/,/unique_object_payload_bytes=
 
 This is the real output of the exact command above.
 
+## Superseded separate-command and unique-byte review
+
+**Reviewed revision:** `7f36270552fd0035f27e0119a19030a1ff20f1ae`
+
+- semantic/DAG / local Codex fresh-context review: `block` — authority-policy clauses
+  retained from amendments 4 and 17 made a policy-changing fast-forward exit 2 while
+  amendment 34 made the same O/N edge clean at exit 0; amendment 18 also still required the
+  removed policy field.
+- CLI/budget/determinism / local Codex fresh-context review: `block` — sorted keys, ASCII
+  escaping, and compact separators did not choose one JSON escaping; `/` and `\\/` both
+  satisfied the words while producing different lengths and serialization counters. The
+  reviewer independently confirmed 67 unique ASCII-sorted counters, reachable graph maxima
+  of 798,720 total bytes and 532,545 peak-line bytes, and fixed-point convergence in at most
+  four counted passes across every base length through the 32 MiB cap.
+- human workflow/core scope / local Codex fresh-context review: `approve` — the two explicit
+  commands preserve independent continuity and ordinary outcomes, current workflow and
+  legacy behavior stay unchanged, and the dormant core/provider service split is usable.
+
+The panel stopped with two independent blocks and one accept. Budget and core-admission
+reviews were not run, and no production implementation began from this revision.
+
 ## Superseded portable-core CLI/result review
 
 **Reviewed revision:** `c0bdc44ae10bfa65a25b961ab5e3970b5bfb6107`

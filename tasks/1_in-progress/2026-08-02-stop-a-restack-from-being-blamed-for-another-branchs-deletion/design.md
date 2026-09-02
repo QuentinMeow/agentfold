@@ -5434,3 +5434,186 @@ accepts. Those reviews cover the separated CLI, standalone bytes, 67-name regist
 Strategy A semantics, local transaction, and explicit provider-service boundary. No verdict
 on `c0bdc44ae10bfa65a25b961ab5e3970b5bfb6107`, no incomplete review, and no verdict on the
 rejected provider/launcher history transfers.
+
+## 2026-09-01 correction amendment 35 — close the standalone core contract
+
+Fresh review of `7f36270552fd0035f27e0119a19030a1ff20f1ae` accepted the human
+two-command workflow and core/provider boundary, but rejected two executable ambiguities.
+Authority-policy rules retained from amendments 4, 17, and 18 made one policy-changing
+fast-forward exit both 0 and 2, and amendment 34's JSON adjectives still allowed distinct
+escaping bytes and therefore distinct serialization counters. Review also exposed that
+amendments 33–34 withdrew trusted execution and provider work only from selected amendment
+ranges instead of from the complete active contract.
+
+### Supersession and retained behavior are closed by subject
+
+This amendment supersedes every earlier clause in this design, regardless of amendment
+number, wherever that clause:
+
+1. requires the dormant core to load, compare, hash, emit, or validate an authority,
+   adapter, execution, launcher, runtime, deployment, selector, receipt, or live-projection
+   policy;
+2. makes namespaces, cgroups, memfds, sealed roots, descriptor protocols, a host verifier,
+   a trusted launcher, or a provider capability a condition for running or completing the
+   local advisory core;
+3. specifies a provider transport, credential, workflow authority, canary, artifact,
+   receipt, check publisher, ruleset, merge-queue association, debt store, Gate 2/3, or
+   provider acceptance as an implementation requirement or completion gate for this task;
+4. permits a core result to become trusted, cumulative, merge-enabling, ref-update
+   authority, or evidence for retiring the current workflow or legacy `--displaced-tip`;
+   or
+5. permits the recursive `automation/reconcile/` source guard to exempt an adapter network,
+   remote-helper, credential, provider API, or publication path.
+
+Those clauses remain rejected design history and are not revived because a selected
+semantic or budget rule once appeared beside them. Receipt, launcher, adapter, and provider
+schemas do not govern `agentfold-ref-update-core/v1`.
+
+The selected contract is only Strategy A's two-arm O/N graph, old-side continuity proof,
+new-side causal authority, final-N frontier, production queue identity and lifecycle rules,
+typed historical retry evaluators, deterministic logical Git/object/result budgets,
+amendment 34's standalone CLI and separate ordinary command, and amendment 33's 67-name
+`CORE_COUNTER_LIMITS_V1` registry. Amendment 34's row semantics, stable Finding, independent
+exits, logical serialization partition, and evidence-only optional workflow remain selected
+except where the exact encoder below replaces its encoding sentences.
+
+### The caller selects advisory code; the core authenticates no policy
+
+The future local `ref_update` CLI calls the future `ref_update_core` module in process using
+the code the caller selected and the one immutable Git object source named by `--git-dir`. It does not
+authenticate its own first instruction, compute or compare a policy digest, inspect a
+selector or receipt, or require provider state. The parser and bounded object reader still
+validate exact O/N syntax, repository object format, and commit types before classification.
+
+A fast-forward returns after the bounded ancestry check and before queue identity, snapshot,
+or causal-root work. A divergent edge applies the executing core's shipped queue identity,
+mutation, deletion-authority, and historical-evaluator rules to immutable O/N history.
+Those rules define diagnostic behavior for this invocation; they are not an authenticated
+execution policy. No complete or incomplete core envelope has a policy, execution,
+provider, selector, receipt, or coverage field.
+
+The CLI runs on AgentFold's existing Python-and-Git platforms. It enforces every selected
+logical counter, bounded child stream, deadline, termination, reap, descriptor closure, and
+zero-partial-result rule, but claims no OS-level address-space, namespace, cgroup, or
+first-instruction containment. A future authoritative caller must supply and verify those
+guarantees outside core. Missing platform containment is therefore not a core failure;
+failure to obtain one complete accepted line remains no result and never becomes clean.
+
+The recursive source guard discovers `ref_update.py` and `ref_update_core.py`, permits only
+their closed local Git/object subprocess shapes, and grants no network, remote-helper,
+credential, provider API, publication, or filesystem-writer exception.
+
+### Fast-forward and ordinary results remain independent
+
+For the concrete mixed case, let O contain a live action and let direct descendant N delete
+it without the lifecycle evidence ordinary queue checking requires:
+
+```text
+O -- N
+     deletes the live action without evidence
+```
+
+The continuity command observes `O <= N` and returns `state=clean`, `common=O`, `rows=[]`,
+and exit 0. It means only that displaced-tip continuity is inapplicable to a fast-forward.
+The separate `reconcile.py --check --range O...N` command examines the real deletion edge,
+emits the ordinary `queue-resolution` Finding, and exits 1. Continuity clean cannot clear
+ordinary blocked. The outputs stay separately named; no combined exit, canonical aggregate,
+merge-eligibility statement, or cumulative clearance exists. No earlier policy-changing
+fast-forward exit-2 rule remains active.
+
+### One Python-standard-library core encoder
+
+The sole complete-result and incomplete-diagnostic encoder is one unmodified encoder:
+
+```python
+json.JSONEncoder(
+    skipkeys=False,
+    ensure_ascii=True,
+    check_circular=True,
+    allow_nan=False,
+    sort_keys=True,
+    indent=None,
+    separators=(",", ":"),
+)
+```
+
+No subclass, custom `default`, alternate encoder, or post-encoding rewrite is permitted.
+For an admitted value `v`, define `E(v)` as the strict ASCII encoding of the concatenation
+of that encoder's `iterencode(v)` fragments followed by exactly one LF. Fragment boundaries
+have no semantic or counter meaning. `E(v)` must be byte-identical to:
+
+```python
+json.dumps(
+    v,
+    skipkeys=False,
+    ensure_ascii=True,
+    check_circular=True,
+    allow_nan=False,
+    sort_keys=True,
+    indent=None,
+    separators=(",", ":"),
+).encode("ascii", "strict") + b"\n"
+```
+
+The admitted in-memory tree uses exact built-in types only: `dict` with exact `str` keys,
+`list`, Unicode-scalar `str`, nonnegative `int`, and `None`. No subclass is admitted.
+`bool`, `float`, tuple, bytes, non-string key, unpaired surrogate, cyclic value, or other
+Python value refuses before encoding. Strings are not normalized, trimmed, or case-folded.
+No JSON Boolean occurs in a core envelope. `None` occurs only as an allowed null `finding`.
+
+A counter is an exact built-in dictionary with exact keys `limit,used`. Both values have
+exact type `int`, never `bool`; `limit` equals `CORE_COUNTER_LIMITS_V1[name]`, and
+`0 <= used <= limit`. Complete-result fields retain amendment 34's exact schemas, ordering,
+enums, digests, paths, reasons, and state consistency. The incomplete diagnostic retains
+only amendment 34's three exact string fields.
+
+Strict acceptance removes one final LF, decodes the rest as ASCII, rejects duplicate object
+keys and every floating-point or nonstandard constant token, and accepts an integer token
+only when it matches `0|[1-9][0-9]{0,7}` and is at most 33,554,432. It then validates the
+exact field grammar and built-in types and requires `E(decoded)` to reproduce the original
+bytes. Whitespace, CRLF, alternate escaping, reordered keys, negative or oversized integers,
+and noncanonical numeric spellings therefore refuse.
+
+### Serialization counters use that exact encoder
+
+Let `V(length,peak)` be the frozen complete result with only
+`result_serialization_bytes.used=length` and
+`result_peak_serialization_chunk_bytes.used=peak`; their limits remain 33,554,432 and
+1,048,576. Starting from `(l0,p0)=(0,0)`, compute:
+
+```text
+encoded_i = E(V(li,pi))
+li+1      = len(encoded_i)
+pi+1      = min(li+1,1048576)
+```
+
+A counting pass may consume the exact encoder fragments without retaining their
+concatenation. The first pair equal to its successor is selected. More than 16 passes, or
+any counted length above 33,554,432, is incomplete. For selected `(L,P)`:
+
+```text
+final_bytes = E(V(L,P))
+L = len(final_bytes) = result_serialization_bytes.used
+P = min(L,1048576) = result_peak_serialization_chunk_bytes.used
+```
+
+Logical serialization chunks remain the consecutive 1,048,576-byte slices of
+`final_bytes` beginning at byte zero, with only the final slice shorter. Iterator, caller,
+pipe, and write boundaries cannot change P. After the fixed point is selected, the encoder
+precharges L, allocates the final buffer once, encodes once, and verifies every equality
+before delivery.
+
+Golden tests cover forbidden Python types, duplicate keys, unpaired surrogates, exact slash,
+quote, control, and Unicode escaping, integer boundaries, every decimal-width transition of
+both self-referential values, L at 1,048,575/1,048,576/1,048,577 and 33,554,432/plus one,
+convergence refusal, and byte identity across `iterencode`, `json.dumps`, library, and CLI.
+
+### Corrected dormant-core gate
+
+Dormant core implementation may begin only after one immutable revision containing
+amendment 35 receives three fresh base-lens accepts, followed on that same revision by
+independent budget and core-admission accepts. Those reviews cover the standalone advisory
+classifier, separate ordinary composition, canonical result/counters, logical resource
+transaction, tests, and explicit trust boundary. Provider service work, trusted execution,
+activation, workflow replacement, and legacy retirement require separate tasks, designs,
+reviews, and PRs and cannot borrow this task's verdicts or POC evidence.

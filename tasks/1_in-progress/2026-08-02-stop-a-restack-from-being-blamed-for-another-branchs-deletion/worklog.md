@@ -603,3 +603,21 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   logical serialization chunks the unique consecutive 1 MiB partition of final bytes.
 - Production remains unopened. Amendment 34 now needs three fresh base-lens accepts, then
   budget and core-admission accepts on the same immutable revision before implementation.
+
+## 2026-09-01 — Close policy supersession and core JSON bytes (codex)
+
+- Three fresh exact-SHA reviews of amendment 34 returned two blocks and one accept. The
+  human-workflow/core-scope lens accepted separate advisory commands, but semantic review
+  found contradictory retained authority-policy fast-forward behavior and budget review
+  found that the JSON escaping rules still admitted different canonical bytes.
+- Amendment 35 supersedes policy, trusted-launcher, provider, activation, and legacy-
+  retirement requirements by subject across all earlier amendments. The local advisory core
+  now authenticates no policy, works on the repository's existing Python-and-Git platforms,
+  claims logical resource bounds rather than trusted OS containment, and grants no network,
+  provider, writer, or publication exception.
+- Bound complete and incomplete envelopes to one exact Python standard-library encoder,
+  closed the admitted in-memory and decoded JSON types, and defined the self-referential
+  serialization counters directly in terms of those exact bytes.
+- Production remains unopened. The new immutable amendment-35 revision still needs three
+  fresh base accepts followed by independent budget and core-admission accepts before
+  dormant implementation may begin.
