@@ -28,7 +28,9 @@ import prototype as edge_witness
 RESULT_SCHEMA = "restack-queue-semantic-result/v1"
 RECEIPT_SCHEMA = "restack-queue-execution-receipt/v1"
 RESULT_KEYS = ("schema", "old", "new", "common", "state", "rows")
-ROW_KEYS = ("path", "kind", "old_blob", "new_blob", "reason")
+ROW_KEYS = ("identity", "paths", "status", "reasons", "finding")
+ROW_IDENTITY_KEYS = ("kind", "path", "old_blob", "new_blob")
+ROW_FINDING_KEYS = ("check", "subject", "message", "fix")
 RECEIPT_KEYS = (
     "schema",
     "result_sha256",
@@ -64,6 +66,25 @@ IMPLEMENTATIONS = ("identity-node-cache", "shared-object-batch")
 DEFAULT_MAX_BYTES = 8 * 1024 * 1024
 DEFAULT_MAX_ROWS = 4096
 OID_LENGTHS = (40, 64)
+FINDING_CHECK = "restack-queue-semantic-boundary-poc"
+ROW_CHANGE_KINDS = ("unauthorized-deletion", "unauthorized-rewrite")
+ROW_STATUSES = ("preserved", "valid", "none", "invalid", "ambiguous")
+ROW_REASON_CODES = {
+    "unauthorized-deletion": "old-action-absent-without-matching-deletion-proof",
+    "unauthorized-rewrite": "old-action-identity-changed-without-matching-proof",
+}
+ROW_MESSAGES = {
+    "unauthorized-deletion": "old action absent without matching deletion proof",
+    "unauthorized-rewrite": "old action identity changed without matching proof",
+}
+ROW_FIXES = {
+    "unauthorized-deletion": "provide an accepted deletion proof before removing the action",
+    "unauthorized-rewrite": "preserve the exact action identity or provide an accepted rewrite proof",
+}
+ROW_STATUS_BY_KIND = {
+    "unauthorized-deletion": "none",
+    "unauthorized-rewrite": "invalid",
+}
 
 
 class ContractError(ValueError):
@@ -112,12 +133,16 @@ def _pairs(value, context: str):
     raise ContractError(f"{context} must be an object")
 
 
-def _ordered_object(value, keys, context: str):
+def _schema_object(value, keys, context: str):
     pairs = _pairs(value, context)
     actual = tuple(key for key, _item in pairs)
-    if actual != tuple(keys):
+    expected = set(keys)
+    actual_set = set(actual)
+    if len(actual) != len(actual_set):
+        raise ContractError(f"{context} has duplicate keys")
+    if actual_set != expected:
         raise ContractError(
-            f"{context} keys/order must be {tuple(keys)!r}, got {actual!r}"
+            f"{context} keys must be exactly {tuple(keys)!r}, got {actual!r}"
         )
     return {key: item for key, item in pairs}
 
@@ -158,49 +183,123 @@ class CodecLimits:
         _require_exact_int(self.max_rows, "max_rows", 0)
 
 
+def _require_path(value, context: str):
+    if type(value) is not str or not value or "\x00" in value:
+        raise ContractError(f"{context} must be a nonempty NUL-free string")
+
+
+def _validate_sorted_string_list(value, allowed, context: str):
+    if type(value) is not list:
+        raise ContractError(f"{context} must be an array")
+    for position, item in enumerate(value):
+        _require_path(item, f"{context}[{position}]")
+        if allowed is not None and item not in allowed:
+            raise ContractError(f"{context}[{position}] is not an accepted value")
+    if value != sorted(set(value), key=lambda item: item.encode("utf-8")):
+        raise ContractError(f"{context} must be sorted and duplicate-free")
+    return value
+
+
+def _canonical_json_bytes(value):
+    return json.dumps(
+        value,
+        sort_keys=True,
+        ensure_ascii=True,
+        allow_nan=False,
+        separators=(",", ":"),
+    ).encode("ascii")
+
+
+def _row_identity_sort_key(row):
+    return _canonical_json_bytes(row["identity"])
+
+
+def _row_for_change(path: str, kind: str, old_blob: str, new_blob: str | None):
+    if kind not in ROW_CHANGE_KINDS:
+        raise ContractError(f"unknown illustrative row kind: {kind}")
+    reason = ROW_REASON_CODES[kind]
+    message = ROW_MESSAGES[kind]
+    return {
+        "identity": {
+            "kind": kind,
+            "path": path,
+            "old_blob": old_blob,
+            "new_blob": new_blob,
+        },
+        "paths": [path],
+        "status": ROW_STATUS_BY_KIND[kind],
+        "reasons": [reason],
+        "finding": {
+            "check": FINDING_CHECK,
+            "subject": path,
+            "message": message,
+            "fix": ROW_FIXES[kind],
+        },
+    }
+
+
 def _validate_row(value, position: int):
-    row = _ordered_object(value, ROW_KEYS, f"row {position}")
-    if type(row["path"]) is not str or not row["path"] or "\x00" in row["path"]:
-        raise ContractError(f"row {position} path must be a nonempty NUL-free string")
-    if row["kind"] not in {"unauthorized-deletion", "unauthorized-rewrite"}:
-        raise ContractError(f"row {position} has an unknown kind")
-    _require_oid(row["old_blob"], f"row {position} old_blob")
-    if row["new_blob"] is not None:
-        _require_oid(row["new_blob"], f"row {position} new_blob")
-    expected_reason = {
-        "unauthorized-deletion": "old action absent without matching deletion proof",
-        "unauthorized-rewrite": "old action identity changed without matching proof",
-    }[row["kind"]]
-    if row["reason"] != expected_reason:
-        raise ContractError(f"row {position} reason is inconsistent with its kind")
-    if row["kind"] == "unauthorized-deletion" and row["new_blob"] is not None:
+    row = _schema_object(value, ROW_KEYS, f"row {position}")
+    identity = _schema_object(row["identity"], ROW_IDENTITY_KEYS, f"row {position} identity")
+    kind = identity["kind"]
+    if kind not in ROW_CHANGE_KINDS:
+        raise ContractError(f"row {position} has an unknown illustrative kind")
+    path = identity["path"]
+    _require_path(path, f"row {position} identity.path")
+    _require_oid(identity["old_blob"], f"row {position} identity.old_blob")
+    if identity["new_blob"] is not None:
+        _require_oid(identity["new_blob"], f"row {position} identity.new_blob")
+    if kind == "unauthorized-deletion" and identity["new_blob"] is not None:
         raise ContractError(f"row {position} deletion must have null new_blob")
-    if row["kind"] == "unauthorized-rewrite" and (
-        row["new_blob"] is None or row["new_blob"] == row["old_blob"]
+    if kind == "unauthorized-rewrite" and (
+        identity["new_blob"] is None or identity["new_blob"] == identity["old_blob"]
     ):
         raise ContractError(f"row {position} rewrite must name a different new_blob")
+    paths = _validate_sorted_string_list(row["paths"], None, f"row {position} paths")
+    if paths != [path]:
+        raise ContractError(f"row {position} illustrative evaluator supports one path")
+    status = row["status"]
+    if status not in ROW_STATUSES:
+        raise ContractError(f"row {position} has an unknown status")
+    if status != ROW_STATUS_BY_KIND[kind]:
+        raise ContractError(f"row {position} status is inconsistent with its kind")
+    reasons = _validate_sorted_string_list(
+        row["reasons"],
+        set(ROW_REASON_CODES.values()),
+        f"row {position} reasons",
+    )
+    if reasons != [ROW_REASON_CODES[kind]]:
+        raise ContractError(f"row {position} reasons are inconsistent with its kind")
+    if status in {"preserved", "valid"}:
+        if row["finding"] is not None:
+            raise ContractError(f"row {position} preserved/valid rows require null finding")
+    else:
+        finding = _schema_object(row["finding"], ROW_FINDING_KEYS, f"row {position} finding")
+        if finding["check"] != FINDING_CHECK:
+            raise ContractError(f"row {position} finding check is inconsistent")
+        if finding["subject"] != path:
+            raise ContractError(f"row {position} finding subject is inconsistent")
+        if finding["message"] != ROW_MESSAGES[kind]:
+            raise ContractError(f"row {position} finding message is inconsistent")
+        if finding["fix"] != ROW_FIXES[kind]:
+            raise ContractError(f"row {position} finding fix is inconsistent")
     return row
 
 
 def validate_result(value, limits=CodecLimits()):
     if type(limits) is not CodecLimits:
         raise ContractError("limits must be CodecLimits")
-    result = _ordered_object(value, RESULT_KEYS, "semantic result")
+    result = _schema_object(value, RESULT_KEYS, "semantic result")
     if result["schema"] != RESULT_SCHEMA:
         raise ContractError(f"semantic result schema must be {RESULT_SCHEMA}")
     _require_oid(result["old"], "old")
     _require_oid(result["new"], "new")
-    if type(result["common"]) is not list:
-        raise ContractError("common must be an array")
     common = result["common"]
-    for position, oid in enumerate(common):
-        _require_oid(oid, f"common[{position}]")
-        if len(oid) != len(result["old"]):
-            raise ContractError("old, new, and common object IDs must use one format")
+    _require_oid(common, "common")
+    if len(common) != len(result["old"]):
+        raise ContractError("old, new, and common object IDs must use one format")
     if len(result["new"]) != len(result["old"]):
         raise ContractError("old and new object IDs must use one format")
-    if common != sorted(set(common)):
-        raise ContractError("common must be a sorted duplicate-free set projection")
     if result["state"] not in {"clean", "blocked"}:
         raise ContractError("state must be clean or blocked; incomplete has no result")
     if type(result["rows"]) is not list:
@@ -210,13 +309,12 @@ def validate_result(value, limits=CodecLimits()):
             f"rows exceeds serialization bound {limits.max_rows}"
         )
     rows = [_validate_row(row, position) for position, row in enumerate(result["rows"])]
-    row_order = [
-        (row["path"].encode("utf-8"), row["kind"], row["old_blob"], row["new_blob"] or "")
-        for row in rows
-    ]
+    row_order = [_row_identity_sort_key(row) for row in rows]
     if row_order != sorted(row_order):
-        raise ContractError("rows must be in canonical bytewise order")
-    paths = [row["path"] for row in rows]
+        raise ContractError("rows must be in canonical identity order")
+    if len(row_order) != len(set(row_order)):
+        raise ContractError("rows must contain at most one finding per identity")
+    paths = [path for row in rows for path in row["paths"]]
     if len(paths) != len(set(paths)):
         raise ContractError("rows must contain at most one finding per path")
     if (result["state"] == "clean") != (not rows):
@@ -225,7 +323,7 @@ def validate_result(value, limits=CodecLimits()):
 
 
 def _validate_counter_object(value, keys, context: str, allow_null=False):
-    counters = _ordered_object(value, keys, context)
+    counters = _schema_object(value, keys, context)
     for key, item in counters.items():
         if allow_null and item is None:
             continue
@@ -234,7 +332,7 @@ def _validate_counter_object(value, keys, context: str, allow_null=False):
 
 
 def validate_receipt(value):
-    receipt = _ordered_object(value, RECEIPT_KEYS, "execution receipt")
+    receipt = _schema_object(value, RECEIPT_KEYS, "execution receipt")
     if receipt["schema"] != RECEIPT_SCHEMA:
         raise ContractError(f"execution receipt schema must be {RECEIPT_SCHEMA}")
     digest = receipt["result_sha256"]
@@ -246,10 +344,10 @@ def validate_receipt(value):
         raise ContractError("result_sha256 must be null or lowercase sha256")
     if type(receipt["implementation"]) is not str or not receipt["implementation"]:
         raise ContractError("implementation must be a nonempty string")
-    runtime = _ordered_object(receipt["runtime"], RUNTIME_KEYS, "runtime")
+    runtime = _schema_object(receipt["runtime"], RUNTIME_KEYS, "runtime")
     if any(type(value) is not str or not value for value in runtime.values()):
         raise ContractError("runtime values must be nonempty strings")
-    budget = _ordered_object(receipt["budget"], BUDGET_KEYS, "budget")
+    budget = _schema_object(receipt["budget"], BUDGET_KEYS, "budget")
     if type(budget["profile"]) is not str or not budget["profile"]:
         raise ContractError("budget.profile must be a nonempty string")
     _validate_counter_object(
@@ -266,7 +364,7 @@ def validate_receipt(value):
         or not receipt["incomplete_reason"]
     ):
         raise ContractError("incomplete_reason must be null or a nonempty string")
-    cleanup = _ordered_object(receipt["cleanup"], CLEANUP_KEYS, "cleanup")
+    cleanup = _schema_object(receipt["cleanup"], CLEANUP_KEYS, "cleanup")
     if any(type(value) is not bool for value in cleanup.values()):
         raise ContractError("cleanup observations must be JSON booleans")
     complete = receipt["exit"] == 0
@@ -317,6 +415,10 @@ def _json_size(value):
 
 
 def _dump(value):
+    return _canonical_json_bytes(value) + b"\n"
+
+
+def _dump_insertion_order_for_test(value):
     return json.dumps(
         value,
         ensure_ascii=True,
@@ -368,6 +470,10 @@ def _parse_exact(data, context: str):
 
 
 def decode_result(data, invocation_old: str, invocation_new: str, limits=CodecLimits()):
+    if type(limits) is not CodecLimits:
+        raise ContractError("limits must be CodecLimits")
+    if type(data) is bytes and len(data) > limits.max_bytes:
+        raise ContractError(f"semantic result exceeds byte bound {limits.max_bytes}")
     parsed = _parse_exact(data, "semantic result")
     result = validate_result(parsed, limits)
     native = _native(parsed)
@@ -505,7 +611,7 @@ class ProofInput:
     label: str
     old: str
     new: str
-    common: tuple[str, ...]
+    common: str
     revision_objects: tuple[tuple[str, str], ...]
     authorized_deletions: tuple[tuple[str, str], ...]
     store: object
@@ -513,16 +619,23 @@ class ProofInput:
     def __post_init__(self):
         _require_oid(self.old, "proof old")
         _require_oid(self.new, "proof new")
-        if self.common != tuple(sorted(set(self.common))):
-            raise ContractError("proof common revisions must be sorted and unique")
+        _require_oid(self.common, "proof common")
         revisions = dict(self.revision_objects)
-        if set((self.old, self.new, *self.common)) - set(revisions):
+        if set((self.old, self.new, self.common)) - set(revisions):
             raise ContractError("proof does not bind every old/new/common revision")
         if len(revisions) != len(self.revision_objects):
             raise ContractError("proof revision map contains duplicates")
 
     def object_for(self, revision: str):
         return dict(self.revision_objects)[revision]
+
+
+def _single_common(merge_bases):
+    bases = tuple(merge_bases)
+    if len(bases) != 1:
+        raise ContractError(f"expected exactly one merge base, got {len(bases)}")
+    _require_oid(bases[0], "common")
+    return bases[0]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -693,28 +806,21 @@ def _result_from_snapshots(proof: ProofInput, snapshots, budget: Budget):
             continue
         if new_blob is None:
             kind = "unauthorized-deletion"
-            reason = "old action absent without matching deletion proof"
         else:
             kind = "unauthorized-rewrite"
-            reason = "old action identity changed without matching proof"
 
         def make_row():
-            return {
-                "path": path,
-                "kind": kind,
-                "old_blob": old_blob,
-                "new_blob": new_blob,
-                "reason": reason,
-            }
+            return _row_for_change(path, kind, old_blob, new_blob)
 
         rows.append(budget.perform("allocations", 1, make_row))
+    rows.sort(key=_row_identity_sort_key)
 
     def make_result():
         return {
             "schema": RESULT_SCHEMA,
             "old": proof.old,
             "new": proof.new,
-            "common": list(proof.common),
+            "common": proof.common,
             "state": "blocked" if rows else "clean",
             "rows": rows,
         }
@@ -723,7 +829,7 @@ def _result_from_snapshots(proof: ProofInput, snapshots, budget: Budget):
 
 
 def evaluate_identity_node_cache(proof: ProofInput, transaction: EvaluationTransaction):
-    revisions = (proof.old, proof.new, *proof.common)
+    revisions = (proof.old, proof.new, proof.common)
     transaction.budget.charge("allocations", 1)
     snapshots = {}
     for revision in revisions:
@@ -734,7 +840,7 @@ def evaluate_identity_node_cache(proof: ProofInput, transaction: EvaluationTrans
 
 
 def evaluate_shared_object_batch(proof: ProofInput, transaction: EvaluationTransaction):
-    revisions = (proof.old, proof.new, *proof.common)
+    revisions = (proof.old, proof.new, proof.common)
     transaction.budget.charge("allocations", 1)
     object_ids = [proof.object_for(revision) for revision in revisions]
     by_object = transaction.request_snapshot_batch(object_ids)
@@ -891,7 +997,7 @@ def synthetic_proof(
 ):
     old = _oid(label + ":old")
     new = _oid(label + ":new")
-    common = (_oid(label + ":common"),)
+    common = _oid(label + ":common")
     old_snapshot = _snapshot(label + ":old", tuple(old_entries))
     new_snapshot = old_snapshot if shared_subtree else _snapshot(
         label + ":new", tuple(new_entries)
@@ -911,7 +1017,7 @@ def synthetic_proof(
         revision_objects=(
             (old, old_snapshot.object_oid),
             (new, new_snapshot.object_oid),
-            (common[0], common_snapshot.object_oid),
+            (common, common_snapshot.object_oid),
         ),
         authorized_deletions=tuple(sorted(authorized)),
         store=store,
@@ -925,7 +1031,8 @@ def real_git_proof(root: Path, factory):
     merge_bases = tuple(sorted(fixture.repo.run(
         "--no-replace-objects", "merge-base", "--all", fixture.O, fixture.N
     ).stdout.splitlines()))
-    revisions = tuple(dict.fromkeys((fixture.O, fixture.N, *merge_bases)))
+    common = _single_common(merge_bases)
+    revisions = tuple(dict.fromkeys((fixture.O, fixture.N, common)))
     revision_objects = tuple(
         (
             revision,
@@ -953,7 +1060,7 @@ def real_git_proof(root: Path, factory):
         label=fixture.scenario_id,
         old=fixture.O,
         new=fixture.N,
-        common=merge_bases,
+        common=common,
         revision_objects=revision_objects,
         authorized_deletions=tuple(sorted(authorized)),
         store=GitSnapshotStore(root),
@@ -1008,7 +1115,44 @@ def _strict_damage_controls(book: CheckBook, clean_bytes: bytes, clean_result, r
         "state": "clean",
         "rows": [],
     }
-    book.raises("reject-key-order", ContractError, lambda: decode_result(_dump(reordered), old, new))
+    book.check("encode-accepts-unordered-result-dicts", encode_result(reordered) == clean_bytes)
+    book.raises(
+        "observed-red-unsorted-result-key-order-refuses",
+        ContractError,
+        lambda: decode_result(_dump_insertion_order_for_test(reordered), old, new),
+    )
+    receipt_value = decode_receipt(receipt)
+    reordered_receipt = {key: receipt_value[key] for key in RECEIPT_KEYS}
+    book.raises(
+        "reject-unsorted-receipt-key-order",
+        ContractError,
+        lambda: decode_receipt(_dump_insertion_order_for_test(reordered_receipt)),
+    )
+    book.raises(
+        "observed-red-common-array-refuses",
+        ContractError,
+        lambda: encode_result(_manual_result(clean_result, common=[clean_result["common"]])),
+    )
+    book.raises(
+        "observed-red-multiple-bases-refuse",
+        ContractError,
+        lambda: _single_common((_oid("base:1"), _oid("base:2"))),
+    )
+    book.raises(
+        "reject-zero-bases-refuse",
+        ContractError,
+        lambda: _single_common(()),
+    )
+    book.raises(
+        "observed-red-decode-byte-limit-refuses",
+        ContractError,
+        lambda: decode_result(
+            clean_bytes,
+            old,
+            new,
+            CodecLimits(max_bytes=len(clean_bytes) - 1, max_rows=0),
+        ),
+    )
     book.raises("reject-wrong-type", ContractError, lambda: encode_result(_manual_result(clean_result, old=7)))
     unknown = dict(clean_result)
     unknown["extra"] = None
@@ -1016,13 +1160,24 @@ def _strict_damage_controls(book: CheckBook, clean_bytes: bytes, clean_result, r
     legacy = dict(clean_result)
     legacy["metrics"] = {"snapshot_requests": 6}
     book.raises("reject-legacy-counter-key", ContractError, lambda: encode_result(legacy))
-    row = {
+    legacy_row = {
         "path": "message-queue/needs-agent/requests/non-blocking-x.md",
         "kind": "unauthorized-deletion",
         "old_blob": _oid("blob:x"),
         "new_blob": None,
         "reason": "old action absent without matching deletion proof",
     }
+    book.raises(
+        "reject-legacy-row-shape",
+        ContractError,
+        lambda: encode_result(_manual_result(clean_result, state="blocked", rows=[legacy_row])),
+    )
+    row = _row_for_change(
+        "message-queue/needs-agent/requests/non-blocking-x.md",
+        "unauthorized-deletion",
+        _oid("blob:x"),
+        None,
+    )
     book.raises(
         "reject-clean-with-rows",
         ContractError,
@@ -1038,7 +1193,6 @@ def _strict_damage_controls(book: CheckBook, clean_bytes: bytes, clean_result, r
         ContractError,
         lambda: decode_result(clean_bytes, _oid("wrong-old"), new),
     )
-    receipt_value = decode_receipt(receipt)
     receipt_value["exit"] = True
     book.raises("reject-bool-as-int-exit", ContractError, lambda: encode_receipt(receipt_value))
     receipt_value = decode_receipt(receipt)
@@ -1347,7 +1501,7 @@ def run_self_test():
 
     book.check(
         "proof-cardinality-excluded-from-authority",
-        tuple(clean_result) == RESULT_KEYS
+        set(clean_result) == set(RESULT_KEYS)
         and all("count" not in key and "metric" not in key for key in clean_result)
         and all("count" not in key and "metric" not in key for key in ROW_KEYS),
     )

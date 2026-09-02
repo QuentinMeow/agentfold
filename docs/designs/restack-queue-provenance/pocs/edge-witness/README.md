@@ -26,27 +26,31 @@ work. Now both implementations must emit byte-identical semantic result bytes, w
 run emits a separate receipt whose bytes are allowed to differ. This module changes no
 production behavior.
 
-The semantic result is exactly one JSON value plus one LF with these top-level keys in this
-order, and no others:
+The semantic result is exactly one JSON value plus one LF with these top-level keys and no
+others:
 
 ```text
 schema, old, new, common, state, rows
 ```
 
-`old` and `new` bind the invocation's full `O` and `N` object IDs. `common` is the sorted,
-duplicate-free list of full shared-boundary object IDs. `state` is `clean` only when `rows`
-is empty and `blocked` only when at least one row exists. Each row has exactly
-`path,kind,old_blob,new_blob,reason` and identifies an unauthorized deletion or rewrite.
-No counter, implementation name, runtime value, limit, cleanup claim, or cardinality field
-is accepted in these bytes.
+`old` and `new` bind the invocation's full `O` and `N` object IDs. `common` is exactly one
+full shared-boundary object ID; a run with zero or multiple merge bases fails closed before
+it can emit accepted result bytes. `state` is `clean` only when `rows` is empty and
+`blocked` only when at least one row exists. Each row has exactly
+`identity,paths,status,reasons,finding`, matching the accepted production row surface while
+remaining an illustrative POC projection rather than a claim that this evaluator implements
+all production row semantics. No counter, implementation name, runtime value, limit,
+cleanup claim, or cardinality field is accepted in these bytes.
 
-The strict codec has one representation: ASCII JSON produced with non-ASCII characters
-escaped, no optional whitespace, canonical key and row order, and exactly one trailing LF.
-The decoder parses with duplicate-key detection, validates exact Python/JSON types, then
-re-encodes and compares every byte. It rejects duplicate keys; unknown and legacy keys;
-wrong types (including JSON booleans where integers are required); alternate escapes; key
-reordering; whitespace and CRLF; prefix or suffix bytes; a missing LF; inconsistent rows,
-kinds, reasons, or state; and `old`/`new` values that differ from the invocation.
+The strict codec has one representation: repository-canonical ASCII JSON produced with
+sorted keys, non-ASCII characters escaped, no optional whitespace, compact separators, and
+exactly one trailing LF. The decoder rejects semantic bytes over the configured byte bound
+before parsing, then parses with duplicate-key detection, validates exact Python/JSON types
+without depending on parsed object order, re-encodes, and compares every byte. It rejects
+duplicate keys; unknown and legacy keys; wrong types (including JSON booleans where
+integers are required); alternate escapes; unsorted transport key order; whitespace and
+CRLF; prefix or suffix bytes; a missing LF; inconsistent rows, kinds, reasons, or state;
+and `old`/`new` values that differ from the invocation.
 
 ### Executable non-uniqueness counterexample
 
@@ -62,7 +66,7 @@ same semantic bytes:
 The exact synthetic semantic result is:
 
 ```json
-{"schema":"restack-queue-semantic-result/v1","old":"7a82f44ff34aa6db4cb1bb8de2b12f77332c68d1","new":"386ce74febd5dc07082d2cbed833e10e15c4b180","common":["663682aad5cdc7cb63caa74f8f4c976b4d001376"],"state":"clean","rows":[]}
+{"common":"663682aad5cdc7cb63caa74f8f4c976b4d001376","new":"386ce74febd5dc07082d2cbed833e10e15c4b180","old":"7a82f44ff34aa6db4cb1bb8de2b12f77332c68d1","rows":[],"schema":"restack-queue-semantic-result/v1","state":"clean"}
 ```
 
 The terminating LF is part of the bytes. Both receipts bind the SHA-256 of those bytes, but
@@ -105,38 +109,40 @@ leaves the real-Git fixture unchanged.
 ### Cardinality decision
 
 No proof-derived set cardinality belongs in the semantic result at this boundary. The
-provider consumer needs the actual sorted `common` identities to bind and replay the proof,
-and it needs the actual finding rows to project `blocked`; it consumes no count. A count is
-derivable from those semantic members, while snapshot counts, witness-set sizes, cache
-sizes, and scan totals depend on implementation strategy. Until a consumer demonstrates a
-decision that cannot use the members themselves, every such count remains receipt-only
-telemetry.
+provider consumer needs the actual `common` identity to bind and replay the proof, and it
+needs the actual finding rows to project `blocked`; it consumes no count. A run that cannot
+prove exactly one shared boundary is incomplete, while snapshot counts, witness-set sizes,
+cache sizes, and scan totals depend on implementation strategy. Until a consumer
+demonstrates a decision that cannot use the members themselves, every such count remains
+receipt-only telemetry.
 
 ### Replayable verification
 
 The new self-test preserves the existing 29-scenario test and independently covers strict
 round trips, the `6/5` versus `1/0` counterexample, fast-forward, divergent clean and
 blocked, provider projection, incomplete runs, exact and `N+1` budgets, observed-minus-one
-maxima, cleanup/fault injection, a 2,048-row result, serialization byte/row bounds, and two
-absolute fixture roots:
+maxima, cleanup/fault injection, a 2,048-row result, serialization byte/row bounds, decode
+byte bounds, sorted-key transport, single-common enforcement, and two absolute fixture
+roots:
 
 ```sh
 python3 docs/designs/restack-queue-provenance/pocs/edge-witness/prototype.py --self-test
 python3 docs/designs/restack-queue-provenance/pocs/edge-witness/semantic_boundary.py --self-test
 ```
 
-The second command emitted 51 named damage-control records followed by this exact summary
+The second command emitted 57 named damage-control records followed by this exact summary
 on 2026-09-02 with Python 3.14.7 and Git 2.55.0:
 
 ```json
-{"checks_passed":82,"checks_total":82,"counterexample":"6/5-vs-1/0","damage_controls_passed":51,"damage_controls_total":51,"large_rows":2048,"real_git_cases":4,"summary":"PASS","synthetic_cases":4}
+{"checks_passed":89,"checks_total":89,"counterexample":"6/5-vs-1/0","damage_controls_passed":57,"damage_controls_total":57,"large_rows":2048,"real_git_cases":4,"summary":"PASS","synthetic_cases":4}
 ```
 
-The 51 controls are 17 strict-transport rejections; two serialization-bound refusals;
-seven observed-minus-one incomplete runs; seven `N+1` pre-charge refusals plus seven
-callback-not-run checks; nine fault/cleanup checks; and two provider incomplete/digest
-checks. The self-test prints each name and `PASS`, so no grouped total can hide a skipped
-control.
+The 57 controls are 23 strict transport/schema rejections, including observed-red probes
+for array `common`, zero or multiple merge bases, unsorted result bytes, and decode byte limits;
+two serialization-bound refusals; seven observed-minus-one incomplete runs; seven `N+1`
+pre-charge refusals plus seven callback-not-run checks; nine fault/cleanup checks; and two
+provider incomplete/digest checks. The self-test prints each name and `PASS`, so no grouped
+total can hide a skipped control.
 
 Cross-implementation comparison:
 
@@ -147,8 +153,8 @@ cmp /tmp/edge-semantic-identity.jsonl /tmp/edge-semantic-batch.jsonl
 shasum -a 256 /tmp/edge-semantic-identity.jsonl /tmp/edge-semantic-batch.jsonl
 ```
 
-The comparison exited 0. Each file contained six results and 1,803 bytes with SHA-256
-`14ee3bb1901fb2a767184cf6b22cdc33ba60acb65fca6f0f2501635f55a15b2c`.
+The comparison exited 0. Each file contained six results and 2,505 bytes with SHA-256
+`0fe3dca2eeb7d6cdf5db483b7862caa7f54ac858154996bf3a971fea6b84fe18`.
 
 Two-environment comparison, changing hash seed, locale, timezone, Python cache root,
 implementation, and absolute fixture root:
@@ -160,7 +166,7 @@ cmp /tmp/edge-semantic-env1.jsonl /tmp/edge-semantic-env2.jsonl
 shasum -a 256 /tmp/edge-semantic-env1.jsonl /tmp/edge-semantic-env2.jsonl
 ```
 
-That comparison also exited 0 with the same six lines, 1,803 bytes, and SHA-256 above.
+That comparison also exited 0 with the same six lines, 2,505 bytes, and SHA-256 above.
 
 ## Result
 
