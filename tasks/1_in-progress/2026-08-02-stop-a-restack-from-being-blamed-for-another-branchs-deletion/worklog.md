@@ -621,3 +621,31 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Production remains unopened. The new immutable amendment-35 revision still needs three
   fresh base accepts followed by independent budget and core-admission accepts before
   dormant implementation may begin.
+
+## 2026-09-02–03 — Production-contract proof repair and serial review (codex)
+
+- Rejected production-contract evidence v11 after three independent readers
+  reproduced module-local gating, transaction, descriptor ownership,
+  wall-clock replay, and bounded publication defects.
+- Replaced global subprocess interception with a mandatory injected Git runner,
+  a private per-audit RepositorySession, complete transaction accounting,
+  one-shot resource ownership, fixed fixture time, and bounded no-follow
+  artifact recovery. Successive fresh findings burned v12–v14 rather than
+  weakening their checks.
+- Frozen v15 at local commit
+  7e47b5b66b579e01e82bb4cbb9e5e622580d4800. It closes the actual public
+  surface: event-only main/__main__, private diagnostic execution, exact
+  seven-name __all__, private Strategy-B fixture closure, and AST dependency
+  verification. Writer evidence is 229/229 scenarios, 41/41 controls, 4/4
+  aliases, 167/167 damage cases, and 16/16 repository test files in serial
+  mode.
+- Honored the owner's new resource rule by stopping the default seven-worker
+  test invocation, rerunning with --jobs 1, and running every later command and
+  reviewer serially. No platform safety-warning task was retried.
+- Three v15 reviewer starts across two model lineages failed before execution
+  with the same backend HTTP 404. They produced zero votes, so v15 remains
+  unaccepted and unmerged; production and semantic repair stay closed behind
+  future-blocking-resume-v15-production-contract-review.md.
+- Prepared durable run findings for the common human development cycles and
+  the exact semantic-boundary migration to v15. These are design inputs, not
+  repository implementation claims.

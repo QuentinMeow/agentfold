@@ -613,3 +613,68 @@ and no production implementation began from this revision.
 
 The panel stopped after three independent blocks. The two remaining lenses were not run,
 and no production implementation began from this revision.
+
+## 2026-09-03 — Serial root verification of the frozen production POC
+
+The production POC remains unaccepted because no v15 fresh reviewer completed.
+Only commands actually run by the root session are below.
+
+~~~text
+$ PYTHONDONTWRITEBYTECODE=1 python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control event-adapter-cli-entrypoint
+exit 0
+status: OBSERVED_RED
+
+$ PYTHONDONTWRITEBYTECODE=1 python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control leak-object-database-pipes
+exit 0
+status: OBSERVED_RED
+
+$ PYTHONPYCACHEPREFIX=/private/tmp/agentfold-root-v12-pycache python3 -m py_compile docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py
+exit 0
+
+$ PYTHONDONTWRITEBYTECODE=1 python3 automation/run_tests.py --jobs 1
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_install.py
+PASS automation/tests/test_integrate.py
+PASS automation/tests/test_markdown_semantics.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_pull_request_schema.py
+PASS automation/tests/test_reconcile_open_actions.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 16/16 files passed
+test elapsed: 206.19s
+
+$ PYTHONDONTWRITEBYTECODE=1 python3 automation/reconcile/reconcile.py --check
+reconcile: 0 blocking finding(s), 6 advisory (not blocking)
+
+$ PYTHONDONTWRITEBYTECODE=1 python3 -S -B -c '<load v15 and inspect _strategy_surface_inventory>'
+185 95 70 0
+
+$ PYTHONDONTWRITEBYTECODE=1 python3 -S -B -X utf8 -c '<load v15 private harness>' docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --control event-adapter-cli-entrypoint
+exit 0
+status: OBSERVED_RED
+~~~
+
+The first default automation/run_tests.py invocation announced seven workers
+and was immediately interrupted to respect the 8 GB combined-memory rule. Its
+KeyboardInterrupt output is intentionally not counted as a test result.
+
+Writer-reported v15 evidence, not independently rerun by root under the memory
+limit: 229/229 scenarios, 41/41 controls, 4/4 aliases, byte-identical
+cross-seed streams at
+f549722e5b86f397867ac393cd33f72825ade5feaad9184b18bde6e6dc50e7be,
+167/167 damage cases, isolated artifact audit PASS, evidence SHA-256
+443f162c11f79a7ad31a6eda1e8b305ce41fcb40ba6173a117995e467a120382,
+and a separate serial 16/16 repository suite.
+
+Fresh v15 panel: 0/3. Three serial starts terminated with backend HTTP 404
+before producing any findings or verdict. No safety warning occurred. Network,
+cold clone, merge, push, semantic composition, production implementation, and
+external review did not run in this verification session.
