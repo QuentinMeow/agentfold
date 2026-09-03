@@ -40,6 +40,7 @@ RECONCILE_PATH = REPOSITORY / "automation/reconcile/reconcile.py"
 REAL_RUN = subprocess.run
 REAL_POPEN = subprocess.Popen
 FIXTURE_DATE = datetime.date(2026, 9, 2)
+INVALID_EVENT_KIND_EVIDENCE = None
 
 
 class GitSpawnObserver(Protocol):
@@ -473,7 +474,7 @@ def event_endpoints(
     environment, or ``github.sha`` input.
     """
 
-    if not isinstance(event_kind, str):
+    if type(event_kind) is not str:
         raise EventInputError(
             "coverage-unavailable: event kind must be a string"
         )
@@ -14989,6 +14990,23 @@ def _event_adapter_control(root: Path) -> dict:
         metrics = result.get("metrics", {}) if result is not None else {}
         runner_calls = getattr(active_runner, "calls", ())
         runner_created = getattr(active_runner, "created", ())
+        canonical_json_serializable = False
+        projected_event_kind = None
+        if result is not None:
+            projected_event_kind = result.get("event_adapter", {}).get(
+                "event_kind"
+            )
+            try:
+                json.dumps(
+                    result,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ).encode("utf-8")
+            except (TypeError, ValueError):
+                pass
+            else:
+                canonical_json_serializable = True
         return {
             "adapter_status": (
                 result.get("event_adapter", {}).get("status")
@@ -15008,6 +15026,7 @@ def _event_adapter_control(root: Path) -> dict:
                 result.get("audit_exit") if result is not None else None
             ),
             "before": len(before_spawns),
+            "canonical_json_serializable": canonical_json_serializable,
             "caught": type(caught).__name__ if caught is not None else None,
             "classification": (
                 result.get("classification") if result is not None else None
@@ -15027,6 +15046,7 @@ def _event_adapter_control(root: Path) -> dict:
             "private_modules_leaked": sorted(
                 private_after - private_before
             ),
+            "projected_event_kind": projected_event_kind,
             "reason": (
                 result.get("evidence_verdict", {}).get("reason")
                 if result is not None
@@ -15180,6 +15200,19 @@ def _event_adapter_control(root: Path) -> dict:
             ("string", "1"),
         )
     }
+
+    class UnhashableString(str):
+        __hash__ = None
+
+        def __eq__(self, _other):
+            raise AssertionError("event-kind equality reached")
+
+        def __repr__(self):
+            raise AssertionError("event-kind repr reached")
+
+        def __str__(self):
+            raise AssertionError("event-kind str reached")
+
     execution_seam["invalid_runtime_inputs"] = {
         label: seam_probe(event_kind, payload)
         for label, event_kind, payload in (
@@ -15190,6 +15223,16 @@ def _event_adapter_control(root: Path) -> dict:
             (
                 "event-kind-dict",
                 {"kind": "local"},
+                clean_input["payload"],
+            ),
+            (
+                "event-kind-unhashable-str-subclass",
+                UnhashableString("local"),
+                clean_input["payload"],
+            ),
+            (
+                "event-kind-plain-object",
+                object(),
                 clean_input["payload"],
             ),
         )
@@ -15749,6 +15792,12 @@ def _event_adapter_control(root: Path) -> dict:
             if not name.startswith("_")
         }
         == {"DEVNULL", "PIPE", "Popen", "TimeoutExpired", "run"},
+        "event_kind_exact_type_boundary": (
+            "type(event_kind) is not str"
+            in inspect.getsource(event_endpoints)
+            and "INVALID_EVENT_KIND_EVIDENCE"
+            in inspect.getsource(_typed_event_failure)
+        ),
         "internal_sessions_have_no_default": all(
             inspect.signature(subject).parameters["session"].default
             is inspect.Parameter.empty
@@ -15821,7 +15870,16 @@ def _event_adapter_control(root: Path) -> dict:
             and item["before"] == 0
             and item["after"] == 0
             and item["runner_calls"] == 0
-            and item["lifecycle"]["factory"] == 0
+            and item["runner_created"] == 0
+            and item["canonical_json_serializable"]
+            and item["lifecycle"]
+            == {
+                "factory": 0,
+                "enter": 0,
+                "exit": 0,
+                "exit_after_reap": None,
+                "exit_exception": None,
+            }
             and reason_fragment in item["reason"]
         )
 
@@ -15914,6 +15972,17 @@ def _event_adapter_control(root: Path) -> dict:
                     if label.startswith("payload")
                     else "event kind must be a string"
                 ),
+            )
+            for label, item in execution_seam[
+                "invalid_runtime_inputs"
+            ].items()
+        )
+        and all(
+            item["projected_event_kind"]
+            == (
+                None
+                if label.startswith("event-kind")
+                else "local"
             )
             for label, item in execution_seam[
                 "invalid_runtime_inputs"
@@ -17692,7 +17761,11 @@ def _typed_event_failure(
             "N": zero,
             "O": zero,
             "endpoint_sources": [],
-            "event_kind": event_kind,
+            "event_kind": (
+                event_kind
+                if type(event_kind) is str
+                else INVALID_EVENT_KIND_EVIDENCE
+            ),
             "github_sha_used": False,
             "mutable_metadata_invariant": True,
             "mutable_state_reads": 0,
