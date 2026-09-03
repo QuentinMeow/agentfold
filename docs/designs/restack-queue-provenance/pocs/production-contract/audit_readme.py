@@ -27,7 +27,16 @@ import tempfile
 from typing import Any
 
 
-SCHEMA = "agentfold-production-contract-evidence/v14"
+SCHEMA = "agentfold-production-contract-evidence/v15"
+PRIVATE_HARNESS_PROGRAM = (
+    "import importlib.util,sys;"
+    "spec=importlib.util.spec_from_file_location("
+    "\"_production_contract_private_harness\",sys.argv[1]);"
+    "module=importlib.util.module_from_spec(spec);"
+    "sys.modules[spec.name]=module;"
+    "spec.loader.exec_module(module);"
+    "raise SystemExit(module._diagnostic_main(sys.argv[2:]))"
+)
 SUPERSEDED_EVIDENCE = {
     "artifacts": [
         {
@@ -141,6 +150,15 @@ SUPERSEDED_EVIDENCE = {
                 "is preserved and v13 is never reused"
             ),
             "schema": "agentfold-production-contract-evidence/v13",
+        },
+        {
+            "commit": "e9a8a4809b11269c98c464c52c3d5074886ae6da",
+            "disposition": (
+                "superseded and burned after transitive public-main and "
+                "fixture-builder Strategy B reachability blockers; history "
+                "is preserved and v14 is never reused"
+            ),
+            "schema": "agentfold-production-contract-evidence/v14",
         },
     ],
     "replacement_schema": SCHEMA,
@@ -756,7 +774,7 @@ FIXTURE_CLAIMS = (
 )
 
 
-# Generated from a byte-identical forward/reverse v14 pair. Every row kind has
+# Generated from a byte-identical forward/reverse v15 pair. Every row kind has
 # one exact recursive shape digest, checked before any projection.
 RAW_SHAPE_CATALOG_V14 = """
 scenario:P1-direct-linear-valid sha256:3f69e6eb45b0e39682e27340f52f906139997a9ddcde927478e17a9239b6d8e4
@@ -993,7 +1011,7 @@ aliases sha256:539a8708aebdaa2816ceb01ed2e091a849972b69700c444eeec8e566eaa9eed3
 control:broad-review-pending-normalization sha256:4d55407e4a51e86c40626e007d59ef9c33330a0f865fa8eee3fc5e490525b414
 control:buffered-graph-output sha256:a5c9687fc28f115ffb25a46739950c0bff58f1297ed55d7d953845957b91b5d5
 control:endpoint-only-origin-equality sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
-control:event-adapter-cli-entrypoint sha256:8c1472a6b234d267a2d7de1a0d05bdc2018ce8211371fdcda01c21f07b2125d1
+control:event-adapter-cli-entrypoint sha256:dc5282286083670e8e822d109e9fbf5a86c0cba1e16ce0dbb090390a0de3437f
 control:first-parent-carry-proof sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
 control:identity-multiplicity-collapsed-to-set sha256:1ac1b79c19942df728cefbeb0153aeb8b42f07ceffc5343fd5981b03e6048190
 control:ignore-absent-C-arm sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
@@ -1569,8 +1587,11 @@ def internal_replay_stream() -> Stream:
                 sys.executable,
                 "-I",
                 "-S",
+                "-B",
                 "-X",
                 "utf8",
+                "-c",
+                PRIVATE_HARNESS_PROGRAM,
                 str(prototype),
                 "--self-test",
                 "--fixtures-dir",
@@ -4360,16 +4381,23 @@ def validate_manifest(manifest):
                     "bounded_git_has_no_fixture_launcher",
                     "classifier_session_has_no_default",
                     "event_kind_exact_type_boundary",
+                    "exact_public_all",
                     "facade_has_no_ambient_delegate",
                     "facade_public_surface_closed",
                     "internal_sessions_have_no_default",
                     "main_runner_has_no_default", "ordinary_cli_absent",
+                    "private_diagnostic_dispatch_present",
                     "intended_public_api_strategy_u_only",
                     "private_strategy_surface_no_public_aliases",
                     "public_ordinary_audit_absent",
+                    "public_builder_fixture_observed_red",
+                    "public_main_event_only",
+                    "public_main_private_suite_observed_red",
                     "public_strategy_guard_observed_red",
                     "public_strategy_selector_absent",
                     "public_strategy_surface_u_only",
+                    "public_surface_ast_closed",
+                    "public_surface_ast_inventory",
                     "pipe_result_publication_bridge",
                     "repository_session_owns_metrics",
                     "repository_session_runner_has_no_default",
@@ -4380,11 +4408,67 @@ def validate_manifest(manifest):
                 ),
                 f"{context}.static_contract",
             )
+            inventory = static["public_surface_ast_inventory"]
+            require_keys(
+                inventory,
+                (
+                    "all_assignment_count", "all_names",
+                    "b_capable_nodes", "dependency_edges",
+                    "direct_b_nodes", "module_local_callables",
+                    "public_callable_roots", "public_exposures",
+                ),
+                f"{context}.static_contract.public_surface_ast_inventory",
+            )
+            intended_public = [
+                "EventEndpoints",
+                "EventInputError",
+                "GitSpawnObserver",
+                "TrustedGitRunner",
+                "audit_event",
+                "event_endpoints",
+                "main",
+            ]
+            required_private_closure = {
+                "_Fixture",
+                "_StrategyBClassifier",
+                "_diagnostic_main",
+                "_ordinary_linear_fixture",
+                "_r19_event_workflow_fixture",
+                "_run_classifier",
+                "_run_suite",
+                "_scenario_builders",
+            }
+            if (
+                inventory["all_assignment_count"] != 1
+                or inventory["all_names"] != intended_public
+                or inventory["public_exposures"] != []
+                or not required_private_closure.issubset(
+                    inventory["b_capable_nodes"]
+                )
+                or any(
+                    not name.startswith("_")
+                    for name in inventory["b_capable_nodes"]
+                )
+                or set(intended_public).difference(
+                    inventory["public_callable_roots"]
+                )
+                or set(inventory["b_capable_nodes"]).intersection(
+                    inventory["public_callable_roots"]
+                )
+                or inventory["dependency_edges"] <= 0
+                or len(inventory["direct_b_nodes"]) <= 0
+            ):
+                raise EvidenceError(
+                    f"{context} public Strategy B AST closure changed"
+                )
             if (
                 any(
                     value is not True
                     for key, value in static.items()
-                    if key != "reconciler_launch_sites"
+                    if key not in {
+                        "public_surface_ast_inventory",
+                        "reconciler_launch_sites",
+                    }
                 )
                 or static["reconciler_launch_sites"]
                 != {"Popen": 2, "run": 65, "total": 67}
@@ -5875,6 +5959,11 @@ def render_readme(manifest):
     blocking_seam = core["immutable_event_workflows"]["cli_control"][
         "observation"
     ]["execution_seam"]["blocking"]
+    public_surface = core["immutable_event_workflows"]["cli_control"][
+        "observation"
+    ]["execution_seam"]["static_contract"][
+        "public_surface_ast_inventory"
+    ]
     by_id = {x["id"]: x for x in manifest["scenarios"]}
     p22, p19 = by_id["P22-PCX-18-one-pass-many-actions"], by_id["PCX-19-missing-claim-blob-recovery"]
     lines = [
@@ -5889,7 +5978,7 @@ def render_readme(manifest):
         f"Canonical evidence artifact: `{evidence_sha}`.",
         f"Canonical semantic stream: `{summary['canonical_stream_sha256']}`.",
         "The raw JSONL stream is ephemeral and has no stored hash claim.",
-        f"Evidence schemas v2 at commit `{core['evidence_supersession']['artifacts'][0]['commit']}`, v3 at commit `{core['evidence_supersession']['artifacts'][1]['commit']}`, v4 at commit `{core['evidence_supersession']['artifacts'][2]['commit']}`, v5 at commit `{core['evidence_supersession']['artifacts'][3]['commit']}`, v6 at commit `{core['evidence_supersession']['artifacts'][4]['commit']}`, v7 at commit `{core['evidence_supersession']['artifacts'][5]['commit']}`, v8 at commit `{core['evidence_supersession']['artifacts'][6]['commit']}`, v9 at commit `{core['evidence_supersession']['artifacts'][7]['commit']}`, v10 at commit `{core['evidence_supersession']['artifacts'][8]['commit']}`, v11 at commit `{core['evidence_supersession']['artifacts'][9]['commit']}`, v12 at commit `{core['evidence_supersession']['artifacts'][10]['commit']}`, and v13 at commit `{core['evidence_supersession']['artifacts'][11]['commit']}` are superseded and burned by their later blockers; all histories are preserved, no identifier is reused, and this artifact closes `{core['evidence_supersession']['replacement_schema']}`.",
+        f"Evidence schemas v2 at commit `{core['evidence_supersession']['artifacts'][0]['commit']}`, v3 at commit `{core['evidence_supersession']['artifacts'][1]['commit']}`, v4 at commit `{core['evidence_supersession']['artifacts'][2]['commit']}`, v5 at commit `{core['evidence_supersession']['artifacts'][3]['commit']}`, v6 at commit `{core['evidence_supersession']['artifacts'][4]['commit']}`, v7 at commit `{core['evidence_supersession']['artifacts'][5]['commit']}`, v8 at commit `{core['evidence_supersession']['artifacts'][6]['commit']}`, v9 at commit `{core['evidence_supersession']['artifacts'][7]['commit']}`, v10 at commit `{core['evidence_supersession']['artifacts'][8]['commit']}`, v11 at commit `{core['evidence_supersession']['artifacts'][9]['commit']}`, v12 at commit `{core['evidence_supersession']['artifacts'][10]['commit']}`, v13 at commit `{core['evidence_supersession']['artifacts'][11]['commit']}`, and v14 at commit `{core['evidence_supersession']['artifacts'][12]['commit']}` are superseded and burned by their later blockers; all histories are preserved, no identifier is reused, and this artifact closes `{core['evidence_supersession']['replacement_schema']}`.",
         f"The execution-bound runtime landed in commits `{bounds['runtime_milestone_commits'][0]}` and `{bounds['runtime_milestone_commits'][1]}`; the latter binds literal refusal at the 68th parent token.", "",
         "## Contract exercised", "",
         "The classifier accepts exactly two immutable inputs, old tip `O` and new tip",
@@ -5941,10 +6030,15 @@ def render_readme(manifest):
         "`audit_event(root, event_kind, payload, *, git_runner, budget_limit=None, transaction=None)`.",
         "The required keyword-only `git_runner` has no default, `None`, ambient, or",
         "process-global fallback. There is no advertised ordinary O/N CLI and no",
-        "selectable non-U production route. Strategy B remains only in private",
-        "diagnostic/self-test symbols; a static public-callable scan rejects either an",
-        "`origin_strategy` parameter, a Strategy B literal, or a public alias of those",
-        "private surfaces.",
+        "selectable non-U production route. Public `main` accepts only the four event",
+        "arguments; self-test, control, fixture-root, reverse-order, damage, and strategy",
+        "selection dispatch lives only in private `_diagnostic_main`, which `__main__`",
+        "never calls. Strategy B remains in private diagnostic fixture and classifier",
+        "types, while the event path constructs a separate Strategy-U-only fixture.",
+        "The module declares exactly seven production-facing names in `__all__`.",
+        f"AST call/return/annotation/assignment reachability inventories {len(public_surface['module_local_callables'])} module-local callables and {len(public_surface['b_capable_nodes'])} Strategy-B-capable closure nodes; all B-capable names are private and none of the {len(public_surface['public_callable_roots'])} public roots reaches one.",
+        "Observed-red AST variants independently add a public main-to-private-suite edge",
+        "and a public builder returning `_Fixture`; each is detected by its public name.",
         "Each valid audit creates a private `RepositorySession` that owns its resolved",
         "root, metrics, observer, children, descriptors, object database and caches,",
         "carry-proof cache, and uniquely named reconciler module. The reconciler's",
@@ -6180,11 +6274,11 @@ def render_readme(manifest):
               f"PCX-19 is replay-bound by `{p19['record_sha256']}`. One ObjectDatabase reader observes a missing blob without caching the miss, the object is restored, the same reader/process succeeds, and a third read hits its positive cache.", "",
               "## Reproducible audit", "",
               "Use two fresh, empty scratch roots:", "", "```sh",
-              "PYTHONHASHSEED=1 LC_ALL=C LANG=C TZ=UTC PYTHONPYCACHEPREFIX=/tmp/production-contract-v14-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-v14-seed1 > /tmp/production-contract-v14-seed1.jsonl",
-              "PYTHONHASHSEED=777 LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 TZ=America/Los_Angeles PYTHONPYCACHEPREFIX=/tmp/production-contract-v14-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --reverse-construction --fixtures-dir /tmp/production-contract-v14-seed777 > /tmp/production-contract-v14-seed777.jsonl",
-              "python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-v14-seed1.jsonl --compare /tmp/production-contract-v14-seed777.jsonl",
-              "python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-v14-seed1.jsonl --damage-test",
-              "python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-v14-seed1.jsonl --compare /tmp/production-contract-v14-seed777.jsonl --generate",
+              f"PYTHONHASHSEED=1 LC_ALL=C LANG=C TZ=UTC python3 -S -B -X utf8 -c '{PRIVATE_HARNESS_PROGRAM}' docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-v15-seed1 > /tmp/production-contract-v15-seed1.jsonl",
+              f"PYTHONHASHSEED=777 LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 TZ=America/Los_Angeles python3 -S -B -X utf8 -c '{PRIVATE_HARNESS_PROGRAM}' docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --reverse-construction --fixtures-dir /tmp/production-contract-v15-seed777 > /tmp/production-contract-v15-seed777.jsonl",
+              "python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-v15-seed1.jsonl --compare /tmp/production-contract-v15-seed777.jsonl",
+              "python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-v15-seed1.jsonl --damage-test",
+              "python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-v15-seed1.jsonl --compare /tmp/production-contract-v15-seed777.jsonl --generate",
               "python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --repo /path/to/repo --event-kind push --event-payload /path/to/event.json",
               "python3 -m py_compile docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py",
               "python3 automation/run_tests.py --jobs 1", "python3 automation/reconcile/reconcile.py --check", "```", "",
@@ -6535,7 +6629,7 @@ def damage_matrix(expected, stream):
         "evidence schema supersession changed",
     )
     for superseded_index, superseded_version in enumerate(
-        range(7, 14), start=5
+        range(7, 15), start=5
     ):
         manifest_case(
             f"superseded-v{superseded_version}-commit-erased",
@@ -6624,6 +6718,40 @@ def damage_matrix(expected, stream):
             public_strategy_selector_absent=False
         ),
         "static session boundary changed",
+    )
+    manifest_case(
+        "event-public-main-diagnostic-options",
+        lambda d: d["core_claims"]["immutable_event_workflows"]
+        ["cli_control"]["observation"]["execution_seam"]
+        ["static_contract"].update(public_main_event_only=False),
+        "static session boundary changed",
+    )
+    manifest_case(
+        "event-public-main-private-suite-edge-hidden",
+        lambda d: d["core_claims"]["immutable_event_workflows"]
+        ["cli_control"]["observation"]["execution_seam"]
+        ["static_contract"].update(
+            public_main_private_suite_observed_red=False
+        ),
+        "static session boundary changed",
+    )
+    manifest_case(
+        "event-public-builder-fixture-edge-hidden",
+        lambda d: d["core_claims"]["immutable_event_workflows"]
+        ["cli_control"]["observation"]["execution_seam"]
+        ["static_contract"].update(
+            public_builder_fixture_observed_red=False
+        ),
+        "static session boundary changed",
+    )
+    manifest_case(
+        "event-public-ast-exposure-erased",
+        lambda d: d["core_claims"]["immutable_event_workflows"]
+        ["cli_control"]["observation"]["execution_seam"]
+        ["static_contract"]["public_surface_ast_inventory"].update(
+            public_exposures=["main"]
+        ),
+        "public Strategy B AST closure changed",
     )
     manifest_case(
         "descriptor-after-exit-leak",

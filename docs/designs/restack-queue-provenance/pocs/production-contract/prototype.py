@@ -8,6 +8,7 @@ validator.  It changes no production behavior.
 from __future__ import annotations
 
 import argparse
+import ast
 import contextlib
 import contextvars
 import dataclasses
@@ -32,6 +33,17 @@ import tempfile
 import threading
 from typing import Any, Callable, ContextManager, Iterable, Mapping, Protocol
 import uuid
+
+
+__all__ = (
+    "EventEndpoints",
+    "EventInputError",
+    "GitSpawnObserver",
+    "TrustedGitRunner",
+    "audit_event",
+    "event_endpoints",
+    "main",
+)
 
 
 HERE = Path(__file__).resolve()
@@ -62,7 +74,7 @@ class TrustedGitRunner(Protocol):
         """Create exactly the requested Git child."""
 
 
-def emit_json(value: Any):
+def _emit_json(value: Any):
     """Write one canonical sorted-key UTF-8 JSONL record."""
     encoded = json.dumps(
         value,
@@ -356,7 +368,7 @@ class ActionState:
 
 
 @dataclasses.dataclass
-class _Fixture:
+class _ProductionFixture:
     scenario: str
     repo: "GitRepository"
     expected_C: str
@@ -367,6 +379,12 @@ class _Fixture:
     details: dict = dataclasses.field(default_factory=dict)
     budget_limit: int | None = None
     budget_limits: dict[str, int] = dataclasses.field(default_factory=dict)
+
+
+@dataclasses.dataclass
+class _Fixture(_ProductionFixture):
+    """Private diagnostic fixture that may select Strategy U or B."""
+
     origin_strategy: str = "U"
 
 
@@ -2561,11 +2579,11 @@ class Graph:
 
 
 class _Classifier:
-    """In-memory provenance over one enumerated graph and cached snapshots."""
+    """Strategy-U provenance over one enumerated graph and cached snapshots."""
 
     def __init__(
         self,
-        fixture: _Fixture,
+        fixture: _ProductionFixture,
         damage: Damage | None = None,
         *,
         session: RepositorySession,
@@ -2588,11 +2606,7 @@ class _Classifier:
         self.objects: ObjectDatabase | None = None
         self.graph: Graph | None = None
         self.carry_proof_cache = session.carry_proof_cache
-        if fixture.origin_strategy not in {"U", "B"}:
-            raise ValueError(
-                f"unsupported origin strategy {fixture.origin_strategy!r}"
-            )
-        self.origin_strategy = fixture.origin_strategy
+        self.origin_strategy = "U"
 
     def budget_overflows(self) -> list[tuple[str, int]]:
         if self.damage.unmetered_cone_work:
@@ -4583,13 +4597,12 @@ class _Classifier:
 
         witnesses = [proof["birth_witness"] for proof in proofs]
         witness_match = witnesses[0] == witnesses[1]
-        if (
-            self.origin_strategy == "B"
-            and not witness_match
-        ):
+        witness_problem = self.origin_witness_problem(witness_match)
+        if witness_problem is not None:
+            reason, reason_code = witness_problem
             return (
-                "Strategy B birth-state witnesses differ",
-                "origin-birth-witness-mismatch",
+                reason,
+                reason_code,
                 proofs,
                 endpoint_checks,
                 False,
@@ -4601,6 +4614,12 @@ class _Classifier:
             endpoint_checks,
             witness_match,
         )
+
+    def origin_witness_problem(
+        self, witness_match: bool
+    ) -> tuple[str, str] | None:
+        """Strategy U does not require byte-identical birth witnesses."""
+        return None
 
     def mutation_edge(
         self,
@@ -6106,8 +6125,44 @@ class _Classifier:
                 raise cleanup_error
 
 
+class _StrategyBClassifier(_Classifier):
+    """Private comparison strategy retained only for diagnostic evidence."""
+
+    def __init__(
+        self,
+        fixture: _Fixture,
+        damage: Damage | None = None,
+        *,
+        session: RepositorySession,
+    ):
+        if fixture.origin_strategy != "B":
+            raise ValueError(
+                "Strategy B classifier requires a Strategy B fixture"
+            )
+        super().__init__(fixture, damage, session=session)
+        self.origin_strategy = "B"
+
+    def origin_witness_problem(
+        self, witness_match: bool
+    ) -> tuple[str, str] | None:
+        if witness_match:
+            return None
+        return (
+            "Strategy B birth-state witnesses differ",
+            "origin-birth-witness-mismatch",
+        )
+
+
 def _run_classifier(fixture: _Fixture, damage: Damage | None = None) -> dict:
     """Run a fixture in one explicit, fully cleaned repository session."""
+    if fixture.origin_strategy == "U":
+        classifier_type = _Classifier
+    elif fixture.origin_strategy == "B":
+        classifier_type = _StrategyBClassifier
+    else:
+        raise ValueError(
+            f"unsupported origin strategy {fixture.origin_strategy!r}"
+        )
     session = RepositorySession(
         fixture.repo.root,
         git_runner=_trusted_git_runner(),
@@ -6121,7 +6176,7 @@ def _run_classifier(fixture: _Fixture, damage: Damage | None = None) -> dict:
     cleanup_error = None
     session.open()
     try:
-        result = _Classifier(fixture, damage, session=session).run()
+        result = classifier_type(fixture, damage, session=session).run()
     except BaseException as error:
         body_error = error
     try:
@@ -6451,7 +6506,7 @@ def feature(repo: GitRepository, label: str):
     return repo.commit(f"add feature {label}")
 
 
-def ordinary_linear_fixture(
+def _ordinary_linear_fixture(
     root: Path, scenario: str, *, valid: bool
 ) -> _Fixture:
     repo = GitRepository(root)
@@ -6480,7 +6535,7 @@ def ordinary_linear_fixture(
     )
 
 
-def p3_old_loss(root: Path) -> _Fixture:
+def _p3_old_loss(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     C = repo.commit("create action-free C")
@@ -6502,7 +6557,7 @@ def p3_old_loss(root: Path) -> _Fixture:
     )
 
 
-def p4_pre_c_origins(root: Path) -> _Fixture:
+def _p4_pre_c_origins(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     R = repo.commit("create pre-C root")
@@ -6534,7 +6589,7 @@ def p4_pre_c_origins(root: Path) -> _Fixture:
     )
 
 
-def p5_duplicate_at_c(root: Path) -> _Fixture:
+def _p5_duplicate_at_c(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     text = agent_text("p5")
@@ -6562,7 +6617,7 @@ def p5_duplicate_at_c(root: Path) -> _Fixture:
     )
 
 
-def p6_old_recreate(root: Path) -> _Fixture:
+def _p6_old_recreate(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     path = add_agent(repo, "p6-old")
@@ -6589,7 +6644,7 @@ def p6_old_recreate(root: Path) -> _Fixture:
     )
 
 
-def p6_candidate_recreate(root: Path) -> _Fixture:
+def _p6_candidate_recreate(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     path = add_agent(repo, "p6-candidate")
@@ -6618,7 +6673,7 @@ def p6_candidate_recreate(root: Path) -> _Fixture:
     )
 
 
-def p7_payload_change(root: Path) -> _Fixture:
+def _p7_payload_change(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     path = add_agent(repo, "p7")
@@ -6649,7 +6704,7 @@ def p7_payload_change(root: Path) -> _Fixture:
     )
 
 
-def p8_timing_move(root: Path) -> _Fixture:
+def _p8_timing_move(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     old_path = add_agent(
@@ -6692,7 +6747,7 @@ def p8_timing_move(root: Path) -> _Fixture:
     )
 
 
-def direct_merge_fixture(
+def _direct_merge_fixture(
     root: Path,
     scenario: str,
     *,
@@ -6751,7 +6806,7 @@ def direct_merge_fixture(
     )
 
 
-def pcx03_foreign_identity(root: Path) -> _Fixture:
+def _pcx03_foreign_identity(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     R = repo.commit("create pre-C root")
@@ -6791,7 +6846,7 @@ def pcx03_foreign_identity(root: Path) -> _Fixture:
     )
 
 
-def supplier_fixture(
+def _supplier_fixture(
     root: Path,
     scenario: str,
     *,
@@ -6847,7 +6902,7 @@ def supplier_fixture(
     )
 
 
-def p14_supplier_reintroduced(root: Path) -> _Fixture:
+def _p14_supplier_reintroduced(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     path = add_agent(repo, "p14")
@@ -6886,7 +6941,7 @@ def p14_supplier_reintroduced(root: Path) -> _Fixture:
     )
 
 
-def p15_competing_suppliers(root: Path) -> _Fixture:
+def _p15_competing_suppliers(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     path = add_agent(repo, "p15")
@@ -6924,7 +6979,7 @@ def p15_competing_suppliers(root: Path) -> _Fixture:
     )
 
 
-def p17_post_event_reintroduction(root: Path) -> _Fixture:
+def _p17_post_event_reintroduction(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     path = add_agent(repo, "p17")
@@ -6954,7 +7009,7 @@ def p17_post_event_reintroduction(root: Path) -> _Fixture:
     )
 
 
-def pcx04_shared_supplier(root: Path) -> _Fixture:
+def _pcx04_shared_supplier(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     path = add_agent(repo, "pcx04")
@@ -6994,7 +7049,7 @@ def pcx04_shared_supplier(root: Path) -> _Fixture:
     )
 
 
-def pcx05_competing_later_supplier(root: Path) -> _Fixture:
+def _pcx05_competing_later_supplier(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     path = add_agent(repo, "pcx05")
@@ -7039,7 +7094,7 @@ def pcx05_competing_later_supplier(root: Path) -> _Fixture:
     )
 
 
-def pcx06_nested_supplier(root: Path) -> _Fixture:
+def _pcx06_nested_supplier(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     R = repo.commit("create pcx06 pre-C root")
@@ -7096,7 +7151,7 @@ def pcx06_nested_supplier(root: Path) -> _Fixture:
     )
 
 
-def pcx09_recreated_claimed_bytes(root: Path) -> _Fixture:
+def _pcx09_recreated_claimed_bytes(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     path = add_agent(repo, "pcx09")
@@ -7133,7 +7188,7 @@ def pcx09_recreated_claimed_bytes(root: Path) -> _Fixture:
     )
 
 
-def pcx10_transient_multiplicity(root: Path) -> _Fixture:
+def _pcx10_transient_multiplicity(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     first = add_agent(repo, "pcx10")
@@ -7162,7 +7217,7 @@ def pcx10_transient_multiplicity(root: Path) -> _Fixture:
     )
 
 
-def pcx11_distinct_payload(root: Path) -> _Fixture:
+def _pcx11_distinct_payload(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     R = repo.commit("create pcx11 pre-C root")
@@ -7210,7 +7265,7 @@ def pcx11_distinct_payload(root: Path) -> _Fixture:
     )
 
 
-def pcx12_timing_supplier(root: Path) -> _Fixture:
+def _pcx12_timing_supplier(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     old_path = add_agent(
@@ -7248,7 +7303,7 @@ def pcx12_timing_supplier(root: Path) -> _Fixture:
     )
 
 
-def human_supplier_fixture(
+def _human_supplier_fixture(
     root: Path, scenario: str, *, conflicting_carrier: bool
 ) -> _Fixture:
     repo = GitRepository(root)
@@ -7343,7 +7398,7 @@ def human_supplier_fixture(
     )
 
 
-def r8_human_response_binding(
+def _r8_human_response_binding(
     root: Path, *, mode: str, conflict: bool
 ) -> _Fixture:
     repo = GitRepository(root)
@@ -7398,7 +7453,7 @@ def r8_human_response_binding(
     )
 
 
-def r8_review_binding(root: Path, *, divergent: bool) -> _Fixture:
+def _r8_review_binding(root: Path, *, divergent: bool) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     disposition = "divergent" if divergent else "identical"
@@ -7457,7 +7512,7 @@ def r8_review_binding(root: Path, *, divergent: bool) -> _Fixture:
     )
 
 
-def r8_review_terminal_binding_conflict(root: Path) -> _Fixture:
+def _r8_review_terminal_binding_conflict(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     label = "r8-review-terminal-conflict"
@@ -7517,7 +7572,7 @@ def r8_review_terminal_binding_conflict(root: Path) -> _Fixture:
     )
 
 
-def r9_review_pending_binding(
+def _r9_review_pending_binding(
     root: Path, *, mode: str, pending_field: str
 ) -> _Fixture:
     repo = GitRepository(root)
@@ -7588,7 +7643,7 @@ def r9_review_pending_binding(
     )
 
 
-def r10_malformed_review_binding(
+def _r10_malformed_review_binding(
     root: Path,
     *,
     mode: str,
@@ -7669,7 +7724,7 @@ def r10_malformed_review_binding(
     )
 
 
-def r13_review_parent_binding(
+def _r13_review_parent_binding(
     root: Path, *, mode: str, variant: str
 ) -> _Fixture:
     """Bind every direct/supplier carrying parent to O's concrete review."""
@@ -7808,7 +7863,7 @@ def low_similarity_delivery_text(text: str, marker: str) -> str:
     raise RuntimeError("fixture has no Resolution evidence field")
 
 
-def r13_persisted_state(root: Path, variant: str) -> _Fixture:
+def _r13_persisted_state(root: Path, variant: str) -> _Fixture:
     """Check O/N mutable state without relying on Git rename similarity."""
     variants = {
         "same-state",
@@ -7945,7 +8000,7 @@ def r13_persisted_state(root: Path, variant: str) -> _Fixture:
     )
 
 
-def r14_review_carrier_binding(
+def _r14_review_carrier_binding(
     root: Path,
     *,
     mode: str,
@@ -8060,7 +8115,7 @@ def r14_review_carrier_binding(
     )
 
 
-def r14_persisted_hidden_bytes(root: Path) -> _Fixture:
+def _r14_persisted_hidden_bytes(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     label = "r14-persisted-hidden-bytes"
@@ -8115,7 +8170,7 @@ def r14_persisted_hidden_bytes(root: Path) -> _Fixture:
     )
 
 
-def r14_persisted_intermediate_claim(root: Path) -> _Fixture:
+def _r14_persisted_intermediate_claim(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     label = "r14-persisted-intermediate-claim"
@@ -8146,7 +8201,7 @@ def r14_persisted_intermediate_claim(root: Path) -> _Fixture:
     )
 
 
-def r14_persisted_intermediate_review(root: Path) -> _Fixture:
+def _r14_persisted_intermediate_review(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     label = "r14-persisted-intermediate-review"
@@ -8195,7 +8250,7 @@ def r14_persisted_intermediate_review(root: Path) -> _Fixture:
     )
 
 
-def r14_persisted_delete_recreate(root: Path) -> _Fixture:
+def _r14_persisted_delete_recreate(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     label = "r14-persisted-delete-recreate"
@@ -8223,7 +8278,7 @@ def r14_persisted_delete_recreate(root: Path) -> _Fixture:
     )
 
 
-def r14_persisted_review_retraction(root: Path) -> _Fixture:
+def _r14_persisted_review_retraction(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     label = "r14-persisted-review-retraction"
@@ -8272,7 +8327,7 @@ def r14_persisted_review_retraction(root: Path) -> _Fixture:
     )
 
 
-def r14_persisted_first_response_move(root: Path) -> _Fixture:
+def _r14_persisted_first_response_move(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     label = "r14-persisted-first-response-move"
@@ -8310,7 +8365,7 @@ def r14_persisted_first_response_move(root: Path) -> _Fixture:
     )
 
 
-def r14_persisted_merge_carriers(root: Path, *, conflict: bool) -> _Fixture:
+def _r14_persisted_merge_carriers(root: Path, *, conflict: bool) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     slug = "conflict" if conflict else "pending"
@@ -8361,7 +8416,7 @@ def r14_persisted_merge_carriers(root: Path, *, conflict: bool) -> _Fixture:
     )
 
 
-def r17_outside_c_neutral_parent(root: Path) -> _Fixture:
+def _r17_outside_c_neutral_parent(root: Path) -> _Fixture:
     """Exact legal-restack DAG from the r17 blocking core review."""
     repo = GitRepository(root)
     initialize(repo)
@@ -8426,7 +8481,7 @@ def r17_outside_c_neutral_parent(root: Path) -> _Fixture:
     )
 
 
-def r17_carry_merge_fixture(
+def _r17_carry_merge_fixture(
     root: Path, *, variant: str, reverse_parents: bool = False
 ) -> _Fixture:
     """Exercise one retained live occurrence across a post-C merge."""
@@ -8509,7 +8564,7 @@ def r17_carry_merge_fixture(
     )
 
 
-def r17_persisted_carry_fixture(
+def _r17_persisted_carry_fixture(
     root: Path, *, variant: str, reverse_parents: bool = False
 ) -> _Fixture:
     """Persist Q across a merge whose second arm must still compete."""
@@ -8607,7 +8662,7 @@ def r17_persisted_carry_fixture(
     )
 
 
-def r17_boundary_budget_fixture(
+def _r17_boundary_budget_fixture(
     root: Path,
     *,
     counter: str = "graph_parent_tokens",
@@ -8671,8 +8726,8 @@ def r17_boundary_budget_fixture(
     )
 
 
-def r17_graph_parent_tokens_exact(root: Path) -> _Fixture:
-    fixture = r17_boundary_budget_fixture(
+def _r17_graph_parent_tokens_exact(root: Path) -> _Fixture:
+    fixture = _r17_boundary_budget_fixture(
         root, counter="graph_parent_tokens", limit=68, exact=True
     )
     fixture.scenario = "R17-graph-parent-tokens-exact"
@@ -8682,8 +8737,8 @@ def r17_graph_parent_tokens_exact(root: Path) -> _Fixture:
     return fixture
 
 
-def r17_graph_parent_tokens_plus_one(root: Path) -> _Fixture:
-    fixture = r17_boundary_budget_fixture(
+def _r17_graph_parent_tokens_plus_one(root: Path) -> _Fixture:
+    fixture = _r17_boundary_budget_fixture(
         root, counter="graph_parent_tokens", limit=67
     )
     fixture.scenario = "R17-graph-parent-tokens-plus-one-refused"
@@ -8693,14 +8748,14 @@ def r17_graph_parent_tokens_plus_one(root: Path) -> _Fixture:
     return fixture
 
 
-def r17_graph_dimension_budget(
+def _r17_graph_dimension_budget(
     root: Path,
     *,
     counter: str,
     limit: int,
     overflow: bool,
 ) -> _Fixture:
-    fixture = r17_boundary_budget_fixture(
+    fixture = _r17_boundary_budget_fixture(
         root, counter=counter, limit=limit, exact=not overflow
     )
     dimension = {
@@ -8719,7 +8774,7 @@ def r17_graph_dimension_budget(
     return fixture
 
 
-def r17_workflow_input_case(root: Path, case: str) -> _Fixture:
+def _r17_workflow_input_case(root: Path, case: str) -> _Fixture:
     """Bind non-core transport claims to the exact O,N-only API."""
     cases = {
         "fast-forward",
@@ -8751,7 +8806,7 @@ def r17_workflow_input_case(root: Path, case: str) -> _Fixture:
             {"preserved_path": path},
         )
     else:
-        fixture = ordinary_linear_fixture(
+        fixture = _ordinary_linear_fixture(
             root,
             f"W-{case}",
             valid=True,
@@ -8861,8 +8916,8 @@ def r17_workflow_input_case(root: Path, case: str) -> _Fixture:
     return fixture
 
 
-def r17_unreadable_boundary(root: Path) -> _Fixture:
-    fixture = r17_outside_c_neutral_parent(root)
+def _r17_unreadable_boundary(root: Path) -> _Fixture:
+    fixture = _r17_outside_c_neutral_parent(root)
     boundary = fixture.details["F"]
     hidden, _target = fixture.repo.hide_loose_object(boundary)
     fixture.scenario = "R17-unreadable-outside-C-boundary"
@@ -8878,7 +8933,7 @@ def r17_unreadable_boundary(root: Path) -> _Fixture:
     return fixture
 
 
-def r17_unopened_outside_c_ancestor(root: Path) -> _Fixture:
+def _r17_unopened_outside_c_ancestor(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     label = "r17-unopened-outside-c-ancestor"
@@ -8946,7 +9001,7 @@ def r17_unopened_outside_c_ancestor(root: Path) -> _Fixture:
     )
 
 
-def r15_old_side_continuity(root: Path, variant: str) -> _Fixture:
+def _r15_old_side_continuity(root: Path, variant: str) -> _Fixture:
     """Exercise occurrence integrity on the C-to-O side of the split."""
     variants = {
         "invalid-delete-recreate",
@@ -9081,7 +9136,7 @@ def conflicting_human_source(
     }
 
 
-def r3_two_invalid_sources(root: Path) -> _Fixture:
+def _r3_two_invalid_sources(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     R = repo.commit("create two-invalid pre-C root")
@@ -9156,7 +9211,7 @@ def r3_two_invalid_sources(root: Path) -> _Fixture:
     )
 
 
-def r3_invalid_valid_competition(root: Path) -> _Fixture:
+def _r3_invalid_valid_competition(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     R = repo.commit("create mixed-source pre-C root")
@@ -9222,7 +9277,7 @@ def r3_invalid_valid_competition(root: Path) -> _Fixture:
     )
 
 
-def r3_valid_plus_invalid_at_N(root: Path) -> _Fixture:
+def _r3_valid_plus_invalid_at_N(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     label = "r3-unrelated-invalid"
@@ -9345,7 +9400,7 @@ def r4_final_wrapper(
     }
 
 
-def r4_same_root_diamond(root: Path) -> _Fixture:
+def _r4_same_root_diamond(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     R = repo.commit("create same-root diamond pre-C root")
@@ -9428,7 +9483,7 @@ def r4_same_root_diamond(root: Path) -> _Fixture:
     )
 
 
-def r4_distinct_root_diamond(root: Path) -> _Fixture:
+def _r4_distinct_root_diamond(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     R = repo.commit("create distinct-root diamond pre-C root")
@@ -9513,7 +9568,7 @@ def r4_distinct_root_diamond(root: Path) -> _Fixture:
     )
 
 
-def r4_equal_root_plus_invalid(root: Path) -> _Fixture:
+def _r4_equal_root_plus_invalid(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     R = repo.commit("create mixed diamond pre-C root")
@@ -9601,7 +9656,7 @@ def r4_equal_root_plus_invalid(root: Path) -> _Fixture:
     )
 
 
-def r5_reintroduced_supplier_history(
+def _r5_reintroduced_supplier_history(
     root: Path, *, later_valid: bool
 ) -> _Fixture:
     repo = GitRepository(root)
@@ -9674,7 +9729,7 @@ def r5_reintroduced_supplier_history(
     )
 
 
-def r6_all_absent_roots(
+def _r6_all_absent_roots(
     root: Path, *, first_valid: bool, second_kind: str
 ) -> _Fixture:
     repo = GitRepository(root)
@@ -9757,7 +9812,7 @@ def r6_all_absent_roots(
     )
 
 
-def r6_same_root_all_absent_wrappers(root: Path) -> _Fixture:
+def _r6_same_root_all_absent_wrappers(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     label = "r6-same-root-all-absent"
@@ -9830,7 +9885,7 @@ def generated_retry(repo: GitRepository, bad_path: str):
     return path
 
 
-def pcx15_generated_retry(root: Path) -> _Fixture:
+def _pcx15_generated_retry(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     bad = "message-queue/needs-agent/requests/bad.md"
@@ -9915,7 +9970,7 @@ def complete_pickup(
     repo.remove(pickup)
 
 
-def pcx16_task_pickup(root: Path) -> _Fixture:
+def _pcx16_task_pickup(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     pickup, backlog, active = add_pickup(repo, "pcx16")
@@ -9945,7 +10000,7 @@ def pcx16_task_pickup(root: Path) -> _Fixture:
     )
 
 
-def r16_supplier_support_fixture(root: Path, variant: str) -> _Fixture:
+def _r16_supplier_support_fixture(root: Path, variant: str) -> _Fixture:
     """Exercise exact source support copying without carrier authority."""
     variants = {
         "forward": "no-finding",
@@ -10093,7 +10148,7 @@ def r16_supplier_support_fixture(root: Path, variant: str) -> _Fixture:
     )
 
 
-def r16_earlier_evidence_reversal(root: Path) -> _Fixture:
+def _r16_earlier_evidence_reversal(root: Path) -> _Fixture:
     """Prove generic root replay cannot authorize an evidence reversal."""
     repo = GitRepository(root)
     initialize(repo)
@@ -10172,7 +10227,7 @@ def r16_earlier_evidence_reversal(root: Path) -> _Fixture:
     )
 
 
-def r16_pickup_evolution(
+def _r16_pickup_evolution(
     root: Path, target_status: str, *, drop_artifact: bool = False
 ) -> _Fixture:
     """Exercise typed monotone pickup support beyond 1_in-progress."""
@@ -10246,7 +10301,7 @@ def r16_pickup_evolution(
     )
 
 
-def p19_identities(root: Path) -> _Fixture:
+def _p19_identities(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     text = agent_text("p19")
@@ -10295,7 +10350,7 @@ def p19_identities(root: Path) -> _Fixture:
     )
 
 
-def p20_lifecycle_types(root: Path) -> _Fixture:
+def _p20_lifecycle_types(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     agent_label = "p20-agent"
@@ -10349,7 +10404,7 @@ def p20_lifecycle_types(root: Path) -> _Fixture:
     )
 
 
-def pcx17_cherry_pick(root: Path, mode: str) -> _Fixture:
+def _pcx17_cherry_pick(root: Path, mode: str) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     path = add_agent(repo, f"pcx17-{mode}")
@@ -10407,7 +10462,7 @@ def pcx17_cherry_pick(root: Path, mode: str) -> _Fixture:
     )
 
 
-def pcx18_many_actions(root: Path) -> _Fixture:
+def _pcx18_many_actions(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     actions = []
@@ -10452,9 +10507,9 @@ def pcx18_many_actions(root: Path) -> _Fixture:
     )
 
 
-def r17_precharge_many_actions_budget(root: Path) -> _Fixture:
+def _r17_precharge_many_actions_budget(root: Path) -> _Fixture:
     """Refuse P22's first over-budget operation before later work starts."""
-    fixture = pcx18_many_actions(root)
+    fixture = _pcx18_many_actions(root)
     reference = _run_classifier(fixture)["metrics"]
     fixture.scenario = "R17-precharge-P22-budget"
     fixture.expected = "blocking-finding"
@@ -10477,8 +10532,8 @@ def r17_precharge_many_actions_budget(root: Path) -> _Fixture:
     return fixture
 
 
-def p18_missing_tip(root: Path) -> _Fixture:
-    fixture = ordinary_linear_fixture(
+def _p18_missing_tip(root: Path) -> _Fixture:
+    fixture = _ordinary_linear_fixture(
         root, "P18a-missing-tip", valid=True
     )
     fixture.O = "f" * len(fixture.O)
@@ -10486,8 +10541,8 @@ def p18_missing_tip(root: Path) -> _Fixture:
     return fixture
 
 
-def p18_noncommit_tip(root: Path) -> _Fixture:
-    fixture = ordinary_linear_fixture(
+def _p18_noncommit_tip(root: Path) -> _Fixture:
+    fixture = _ordinary_linear_fixture(
         root, "P18b-noncommit-tip", valid=True
     )
     fixture.O = fixture.repo.run(
@@ -10497,8 +10552,8 @@ def p18_noncommit_tip(root: Path) -> _Fixture:
     return fixture
 
 
-def p18_unrelated_tip(root: Path) -> _Fixture:
-    fixture = ordinary_linear_fixture(
+def _p18_unrelated_tip(root: Path) -> _Fixture:
+    fixture = _ordinary_linear_fixture(
         root, "P18c-unrelated-tip", valid=True
     )
     empty = fixture.repo.run("mktree", input_text="").stdout.strip()
@@ -10511,8 +10566,8 @@ def p18_unrelated_tip(root: Path) -> _Fixture:
     return fixture
 
 
-def p18_shallow(root: Path) -> _Fixture:
-    fixture = ordinary_linear_fixture(
+def _p18_shallow(root: Path) -> _Fixture:
+    fixture = _ordinary_linear_fixture(
         root, "P18d-shallow-required-region", valid=True
     )
     (fixture.repo.root / ".git/shallow").write_text(
@@ -10522,8 +10577,8 @@ def p18_shallow(root: Path) -> _Fixture:
     return fixture
 
 
-def p18_missing_blob(root: Path) -> _Fixture:
-    fixture = ordinary_linear_fixture(
+def _p18_missing_blob(root: Path) -> _Fixture:
+    fixture = _ordinary_linear_fixture(
         root, "P18e-missing-queue-blob", valid=True
     )
     path = queue_path(fixture.scenario.lower())
@@ -10534,8 +10589,8 @@ def p18_missing_blob(root: Path) -> _Fixture:
     return fixture
 
 
-def p18_missing_tree(root: Path) -> _Fixture:
-    fixture = ordinary_linear_fixture(
+def _p18_missing_tree(root: Path) -> _Fixture:
+    fixture = _ordinary_linear_fixture(
         root, "P18f-missing-queue-tree", valid=True
     )
     tree = fixture.repo.tree_entry_oid(
@@ -10547,7 +10602,7 @@ def p18_missing_tree(root: Path) -> _Fixture:
     return fixture
 
 
-def p18_multiple_bases(root: Path) -> _Fixture:
+def _p18_multiple_bases(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     add_agent(repo, "p18g")
@@ -10579,8 +10634,8 @@ def p18_multiple_bases(root: Path) -> _Fixture:
     )
 
 
-def pcx19_missing_claim_blob(root: Path) -> _Fixture:
-    fixture = ordinary_linear_fixture(
+def _pcx19_missing_claim_blob(root: Path) -> _Fixture:
+    fixture = _ordinary_linear_fixture(
         root, "PCX-19-missing-claim-blob-recovery", valid=True
     )
     label = fixture.scenario.lower()
@@ -10607,7 +10662,7 @@ def pcx19_missing_claim_blob(root: Path) -> _Fixture:
     return fixture
 
 
-def budget_fixture(root: Path, *, overflow: bool) -> _Fixture:
+def _budget_fixture(root: Path, *, overflow: bool) -> _Fixture:
     scenario = (
         "PCX-20b-budget-overflow"
         if overflow
@@ -10686,7 +10741,7 @@ def _configure_typed_budget_fixture(
     return fixture
 
 
-def r17_large_object_budget(root: Path, *, overflow: bool) -> _Fixture:
+def _r17_large_object_budget(root: Path, *, overflow: bool) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     label = "r17-large-object"
@@ -10731,7 +10786,7 @@ def r17_large_object_budget(root: Path, *, overflow: bool) -> _Fixture:
     )
 
 
-def r17_wide_tree_budget(root: Path, *, overflow: bool) -> _Fixture:
+def _r17_wide_tree_budget(root: Path, *, overflow: bool) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     label = "r17-wide-tree"
@@ -10769,10 +10824,10 @@ def r17_wide_tree_budget(root: Path, *, overflow: bool) -> _Fixture:
     )
 
 
-def r17_support_serialization_budget(
+def _r17_support_serialization_budget(
     root: Path, *, overflow: bool
 ) -> _Fixture:
-    fixture = ordinary_linear_fixture(
+    fixture = _ordinary_linear_fixture(
         root, "probe-support-serialization", valid=True
     )
     return _configure_typed_budget_fixture(
@@ -10787,8 +10842,8 @@ def r17_support_serialization_budget(
     )
 
 
-def r17_dynamic_support_budget(root: Path, *, overflow: bool) -> _Fixture:
-    fixture = pcx16_task_pickup(root)
+def _r17_dynamic_support_budget(root: Path, *, overflow: bool) -> _Fixture:
+    fixture = _pcx16_task_pickup(root)
     return _configure_typed_budget_fixture(
         fixture,
         scenario=(
@@ -11507,7 +11562,7 @@ def _r18_origin_budget_fixture(
     return fixture
 
 
-def r19_event_workflow_fixture(
+def _r19_event_workflow_fixture(
     root: Path,
     *,
     transport: str,
@@ -11529,7 +11584,7 @@ def r19_event_workflow_fixture(
             strategy="U",
         )
     else:
-        fixture = ordinary_linear_fixture(
+        fixture = _ordinary_linear_fixture(
             root,
             f"r19-event-{transport}-{failure}",
             valid=True,
@@ -11593,110 +11648,110 @@ def r19_event_workflow_fixture(
 
 def _scenario_builders():
     return [
-        lambda root: ordinary_linear_fixture(
+        lambda root: _ordinary_linear_fixture(
             root, "P1-direct-linear-valid", valid=True
         ),
-        lambda root: ordinary_linear_fixture(
+        lambda root: _ordinary_linear_fixture(
             root, "P2-direct-linear-invalid", valid=False
         ),
-        p3_old_loss,
-        p4_pre_c_origins,
-        p5_duplicate_at_c,
-        p6_old_recreate,
-        p6_candidate_recreate,
-        p7_payload_change,
-        p8_timing_move,
-        lambda root: direct_merge_fixture(
+        _p3_old_loss,
+        _p4_pre_c_origins,
+        _p5_duplicate_at_c,
+        _p6_old_recreate,
+        _p6_candidate_recreate,
+        _p7_payload_change,
+        _p8_timing_move,
+        lambda root: _direct_merge_fixture(
             root,
             "P9-direct-two-parent-valid",
             parent_count=2,
         ),
-        lambda root: direct_merge_fixture(
+        lambda root: _direct_merge_fixture(
             root,
             "P10-direct-invalid-parent",
             parent_count=2,
             invalid_parent=1,
         ),
-        lambda root: direct_merge_fixture(
+        lambda root: _direct_merge_fixture(
             root,
             "P11-direct-three-parent-valid",
             parent_count=3,
         ),
-        lambda root: supplier_fixture(
+        lambda root: _supplier_fixture(
             root,
             "P12-merge-supplier-valid",
             supplier_valid=True,
         ),
-        lambda root: supplier_fixture(
+        lambda root: _supplier_fixture(
             root,
             "P13-merge-supplier-invalid",
             supplier_valid=False,
         ),
-        p14_supplier_reintroduced,
-        p15_competing_suppliers,
-        lambda root: supplier_fixture(
+        _p14_supplier_reintroduced,
+        _p15_competing_suppliers,
+        lambda root: _supplier_fixture(
             root,
             "P16-PCX-08-invalid-supplier-claimed-carrier",
             supplier_valid=False,
             carrier_claimed=True,
             merge_changes_evidence=True,
         ),
-        p17_post_event_reintroduction,
-        p18_missing_tip,
-        p18_noncommit_tip,
-        p18_unrelated_tip,
-        p18_shallow,
-        p18_missing_blob,
-        p18_missing_tree,
-        p18_multiple_bases,
-        p19_identities,
-        p20_lifecycle_types,
-        lambda root: pcx17_cherry_pick(root, "squash"),
-        pcx18_many_actions,
-        r17_precharge_many_actions_budget,
-        lambda root: direct_merge_fixture(
+        _p17_post_event_reintroduction,
+        _p18_missing_tip,
+        _p18_noncommit_tip,
+        _p18_unrelated_tip,
+        _p18_shallow,
+        _p18_missing_blob,
+        _p18_missing_tree,
+        _p18_multiple_bases,
+        _p19_identities,
+        _p20_lifecycle_types,
+        lambda root: _pcx17_cherry_pick(root, "squash"),
+        _pcx18_many_actions,
+        _r17_precharge_many_actions_budget,
+        lambda root: _direct_merge_fixture(
             root,
             "PCX-01-neutral-parent",
             parent_count=2,
             neutral_parent=True,
         ),
-        lambda root: direct_merge_fixture(
+        lambda root: _direct_merge_fixture(
             root,
             "PCX-02-neutral-plus-invalid-carrier",
             parent_count=2,
             invalid_parent=1,
             neutral_parent=True,
         ),
-        pcx03_foreign_identity,
-        pcx04_shared_supplier,
-        pcx05_competing_later_supplier,
-        pcx06_nested_supplier,
-        lambda root: supplier_fixture(
+        _pcx03_foreign_identity,
+        _pcx04_shared_supplier,
+        _pcx05_competing_later_supplier,
+        _pcx06_nested_supplier,
+        lambda root: _supplier_fixture(
             root,
             "PCX-07-overqualified-propagation",
             supplier_valid=True,
             carrier_claimed=True,
         ),
-        pcx09_recreated_claimed_bytes,
-        pcx10_transient_multiplicity,
-        pcx11_distinct_payload,
-        pcx12_timing_supplier,
-        lambda root: human_supplier_fixture(
+        _pcx09_recreated_claimed_bytes,
+        _pcx10_transient_multiplicity,
+        _pcx11_distinct_payload,
+        _pcx12_timing_supplier,
+        lambda root: _human_supplier_fixture(
             root,
             "PCX-13-conflicting-human-response",
             conflicting_carrier=True,
         ),
-        lambda root: human_supplier_fixture(
+        lambda root: _human_supplier_fixture(
             root,
             "PCX-14-valid-human-supplier",
             conflicting_carrier=False,
         ),
-        pcx15_generated_retry,
-        pcx16_task_pickup,
+        _pcx15_generated_retry,
+        _pcx16_task_pickup,
         *[
             (
                 lambda root, variant=variant:
-                r16_supplier_support_fixture(root, variant)
+                _r16_supplier_support_fixture(root, variant)
             )
             for variant in (
                 "forward",
@@ -11709,14 +11764,14 @@ def _scenario_builders():
                 "permutation-diamond",
             )
         ],
-        lambda root: r16_pickup_evolution(
+        lambda root: _r16_pickup_evolution(
             root, "3_in-review", drop_artifact=True
         ),
-        r16_earlier_evidence_reversal,
+        _r16_earlier_evidence_reversal,
         *[
             (
                 lambda root, target_status=target_status:
-                r16_pickup_evolution(root, target_status)
+                _r16_pickup_evolution(root, target_status)
             )
             for target_status in (
                 "2_blocked",
@@ -11725,92 +11780,92 @@ def _scenario_builders():
                 "0_backlog",
             )
         ],
-        lambda root: pcx17_cherry_pick(root, "complete"),
-        lambda root: pcx17_cherry_pick(root, "deletion-only"),
-        pcx19_missing_claim_blob,
-        lambda root: budget_fixture(root, overflow=False),
-        lambda root: budget_fixture(root, overflow=True),
+        lambda root: _pcx17_cherry_pick(root, "complete"),
+        lambda root: _pcx17_cherry_pick(root, "deletion-only"),
+        _pcx19_missing_claim_blob,
+        lambda root: _budget_fixture(root, overflow=False),
+        lambda root: _budget_fixture(root, overflow=True),
         *[
-            lambda root, overflow=overflow: r17_large_object_budget(
+            lambda root, overflow=overflow: _r17_large_object_budget(
                 root, overflow=overflow
             )
             for overflow in (False, True)
         ],
         *[
-            lambda root, overflow=overflow: r17_wide_tree_budget(
+            lambda root, overflow=overflow: _r17_wide_tree_budget(
                 root, overflow=overflow
             )
             for overflow in (False, True)
         ],
         *[
-            lambda root, overflow=overflow: r17_support_serialization_budget(
+            lambda root, overflow=overflow: _r17_support_serialization_budget(
                 root, overflow=overflow
             )
             for overflow in (False, True)
         ],
         *[
-            lambda root, overflow=overflow: r17_dynamic_support_budget(
+            lambda root, overflow=overflow: _r17_dynamic_support_budget(
                 root, overflow=overflow
             )
             for overflow in (False, True)
         ],
-        r3_two_invalid_sources,
-        r3_invalid_valid_competition,
-        r3_valid_plus_invalid_at_N,
-        r4_same_root_diamond,
-        r4_distinct_root_diamond,
-        r4_equal_root_plus_invalid,
-        lambda root: r5_reintroduced_supplier_history(
+        _r3_two_invalid_sources,
+        _r3_invalid_valid_competition,
+        _r3_valid_plus_invalid_at_N,
+        _r4_same_root_diamond,
+        _r4_distinct_root_diamond,
+        _r4_equal_root_plus_invalid,
+        lambda root: _r5_reintroduced_supplier_history(
             root, later_valid=False
         ),
-        lambda root: r5_reintroduced_supplier_history(
+        lambda root: _r5_reintroduced_supplier_history(
             root, later_valid=True
         ),
-        lambda root: r6_all_absent_roots(
+        lambda root: _r6_all_absent_roots(
             root, first_valid=True, second_kind="invalid"
         ),
-        lambda root: r6_all_absent_roots(
+        lambda root: _r6_all_absent_roots(
             root, first_valid=True, second_kind="ambiguous"
         ),
-        lambda root: r6_all_absent_roots(
+        lambda root: _r6_all_absent_roots(
             root, first_valid=False, second_kind="invalid"
         ),
-        r6_same_root_all_absent_wrappers,
-        lambda root: r8_human_response_binding(
+        _r6_same_root_all_absent_wrappers,
+        lambda root: _r8_human_response_binding(
             root, mode="direct", conflict=True
         ),
-        lambda root: r8_human_response_binding(
+        lambda root: _r8_human_response_binding(
             root, mode="direct", conflict=False
         ),
-        lambda root: r8_human_response_binding(
+        lambda root: _r8_human_response_binding(
             root, mode="supplier", conflict=True
         ),
-        lambda root: r8_human_response_binding(
+        lambda root: _r8_human_response_binding(
             root, mode="supplier", conflict=False
         ),
-        lambda root: r8_review_binding(root, divergent=True),
-        lambda root: r8_review_binding(root, divergent=False),
-        r8_review_terminal_binding_conflict,
-        lambda root: r9_review_pending_binding(
+        lambda root: _r8_review_binding(root, divergent=True),
+        lambda root: _r8_review_binding(root, divergent=False),
+        _r8_review_terminal_binding_conflict,
+        lambda root: _r9_review_pending_binding(
             root, mode="direct", pending_field="Review target"
         ),
-        lambda root: r9_review_pending_binding(
+        lambda root: _r9_review_pending_binding(
             root, mode="direct", pending_field="Review revision"
         ),
-        lambda root: r9_review_pending_binding(
+        lambda root: _r9_review_pending_binding(
             root, mode="supplier", pending_field="Review target"
         ),
-        lambda root: r9_review_pending_binding(
+        lambda root: _r9_review_pending_binding(
             root, mode="supplier", pending_field="Review revision"
         ),
-        lambda root: r10_malformed_review_binding(
+        lambda root: _r10_malformed_review_binding(
             root,
             mode="direct",
             field="Review target",
             malformed_value="pend\u0131ng",
             slug="backtick-dotless",
         ),
-        lambda root: r10_malformed_review_binding(
+        lambda root: _r10_malformed_review_binding(
             root,
             mode="supplier",
             field="Review revision",
@@ -11820,7 +11875,7 @@ def _scenario_builders():
         *[
             (
                 lambda root, mode=mode, variant=variant:
-                r13_review_parent_binding(
+                _r13_review_parent_binding(
                     root, mode=mode, variant=variant
                 )
             )
@@ -11830,7 +11885,7 @@ def _scenario_builders():
         *[
             (
                 lambda root, variant=variant:
-                r13_persisted_state(root, variant)
+                _r13_persisted_state(root, variant)
             )
             for variant in (
                 "same-state",
@@ -11844,89 +11899,89 @@ def _scenario_builders():
                 "terminal-fill",
             )
         ],
-        lambda root: r14_review_carrier_binding(
+        lambda root: _r14_review_carrier_binding(
             root,
             mode="direct",
             carrier_variant="same",
             old_answered=False,
         ),
-        lambda root: r14_review_carrier_binding(
+        lambda root: _r14_review_carrier_binding(
             root,
             mode="direct",
             carrier_variant="target",
             old_answered=False,
         ),
-        lambda root: r14_review_carrier_binding(
+        lambda root: _r14_review_carrier_binding(
             root,
             mode="supplier",
             carrier_variant="pending",
             old_answered=True,
         ),
-        lambda root: r14_review_carrier_binding(
+        lambda root: _r14_review_carrier_binding(
             root,
             mode="supplier",
             carrier_variant="same",
             old_answered=True,
         ),
-        lambda root: r14_review_carrier_binding(
+        lambda root: _r14_review_carrier_binding(
             root,
             mode="supplier",
             carrier_variant="target",
             old_answered=True,
         ),
-        lambda root: r14_review_carrier_binding(
+        lambda root: _r14_review_carrier_binding(
             root,
             mode="supplier",
             carrier_variant="revision",
             old_answered=True,
         ),
-        lambda root: r14_review_carrier_binding(
+        lambda root: _r14_review_carrier_binding(
             root,
             mode="supplier",
             carrier_variant="same",
             old_answered=False,
         ),
-        lambda root: r14_review_carrier_binding(
+        lambda root: _r14_review_carrier_binding(
             root,
             mode="supplier",
             carrier_variant="target",
             old_answered=False,
         ),
-        r14_persisted_hidden_bytes,
-        r14_persisted_intermediate_claim,
-        r14_persisted_intermediate_review,
-        r14_persisted_delete_recreate,
-        r14_persisted_review_retraction,
-        r14_persisted_first_response_move,
-        lambda root: r14_persisted_merge_carriers(
+        _r14_persisted_hidden_bytes,
+        _r14_persisted_intermediate_claim,
+        _r14_persisted_intermediate_review,
+        _r14_persisted_delete_recreate,
+        _r14_persisted_review_retraction,
+        _r14_persisted_first_response_move,
+        lambda root: _r14_persisted_merge_carriers(
             root, conflict=False
         ),
-        lambda root: r14_persisted_merge_carriers(
+        lambda root: _r14_persisted_merge_carriers(
             root, conflict=True
         ),
-        r17_outside_c_neutral_parent,
-        lambda root: r17_carry_merge_fixture(
+        _r17_outside_c_neutral_parent,
+        lambda root: _r17_carry_merge_fixture(
             root, variant="compatible"
         ),
-        lambda root: r17_carry_merge_fixture(
+        lambda root: _r17_carry_merge_fixture(
             root, variant="compatible", reverse_parents=True
         ),
-        lambda root: r17_carry_merge_fixture(
+        lambda root: _r17_carry_merge_fixture(
             root, variant="incompatible"
         ),
-        lambda root: r17_carry_merge_fixture(
+        lambda root: _r17_carry_merge_fixture(
             root, variant="absent-arm"
         ),
-        lambda root: r17_carry_merge_fixture(
+        lambda root: _r17_carry_merge_fixture(
             root, variant="outside-single"
         ),
-        lambda root: r17_carry_merge_fixture(
+        lambda root: _r17_carry_merge_fixture(
             root, variant="outside-duplicate"
         ),
         *[
             (
                 lambda root, variant=variant, reverse=reverse:
-                r17_persisted_carry_fixture(
+                _r17_persisted_carry_fixture(
                     root,
                     variant=variant,
                     reverse_parents=reverse,
@@ -11940,13 +11995,13 @@ def _scenario_builders():
             )
             for reverse in (False, True)
         ],
-        r17_boundary_budget_fixture,
-        r17_graph_parent_tokens_exact,
-        r17_graph_parent_tokens_plus_one,
+        _r17_boundary_budget_fixture,
+        _r17_graph_parent_tokens_exact,
+        _r17_graph_parent_tokens_plus_one,
         *[
             (
                 lambda root, counter=counter, limit=limit, overflow=overflow:
-                r17_graph_dimension_budget(
+                _r17_graph_dimension_budget(
                     root,
                     counter=counter,
                     limit=limit - int(overflow),
@@ -11962,7 +12017,7 @@ def _scenario_builders():
         *[
             (
                 lambda root, case=case:
-                r17_workflow_input_case(root, case)
+                _r17_workflow_input_case(root, case)
             )
             for case in (
                 "fast-forward",
@@ -11975,8 +12030,8 @@ def _scenario_builders():
                 "pr-synchronize",
             )
         ],
-        r17_unreadable_boundary,
-        r17_unopened_outside_c_ancestor,
+        _r17_unreadable_boundary,
+        _r17_unopened_outside_c_ancestor,
         *[
             (
                 lambda root, strategy=strategy:
@@ -12124,7 +12179,7 @@ def _scenario_builders():
         *[
             (
                 lambda root, transport=transport, attack=attack:
-                r19_event_workflow_fixture(
+                _r19_event_workflow_fixture(
                     root,
                     transport=transport,
                     attack=attack,
@@ -12138,13 +12193,13 @@ def _scenario_builders():
             )
             for attack in (False, True)
         ],
-        lambda root: r19_event_workflow_fixture(
+        lambda root: _r19_event_workflow_fixture(
             root, transport="local", failure="missing-old"
         ),
-        lambda root: r19_event_workflow_fixture(
+        lambda root: _r19_event_workflow_fixture(
             root, transport="push", failure="zero-before"
         ),
-        lambda root: r19_event_workflow_fixture(
+        lambda root: _r19_event_workflow_fixture(
             root,
             transport="pull-request-synchronize",
             failure="head-mismatch",
@@ -12166,7 +12221,7 @@ def _scenario_builders():
         *[
             (
                 lambda root, variant=variant:
-                r15_old_side_continuity(root, variant)
+                _r15_old_side_continuity(root, variant)
             )
             for variant in (
                 "invalid-delete-recreate",
@@ -12179,7 +12234,7 @@ def _scenario_builders():
     ]
 
 
-CONTROL_NAMES = (
+_CONTROL_NAMES = (
     "buffered-graph-output",
     "stream-malformed-truncated-final-line",
     "unmetered-object-payload",
@@ -12224,7 +12279,7 @@ CONTROL_NAMES = (
 )
 
 
-SCENARIO_ALIASES = {
+_SCENARIO_ALIASES = {
     "S1": {
         "scenario": "P1-direct-linear-valid",
         "classification": "no-finding",
@@ -12347,7 +12402,7 @@ def _run_fixture(fixture: _Fixture, damage: Damage | None = None):
     return second
 
 
-def validate_result(result: dict):
+def _validate_result(result: dict):
     scenario = result["scenario"]
     errors = []
     if result["classification"] != result["expected_result"]:
@@ -14510,40 +14565,40 @@ def validate_result(result: dict):
     return errors
 
 
-def control_builder(name: str, root: Path):
+def _control_builder(name: str, root: Path):
     if name == "buffered-graph-output":
         return (
-            r17_boundary_budget_fixture(root),
+            _r17_boundary_budget_fixture(root),
             Damage(buffered_graph_output=True),
             "blocking-finding",
         )
     if name == "unmetered-object-payload":
         return (
-            r17_large_object_budget(root, overflow=True),
+            _r17_large_object_budget(root, overflow=True),
             Damage(unmetered_object_bytes=True),
             "no-finding",
         )
     if name == "unmetered-tree-paths":
         return (
-            r17_wide_tree_budget(root, overflow=True),
+            _r17_wide_tree_budget(root, overflow=True),
             Damage(unmetered_tree_paths=True),
             "no-finding",
         )
     if name == "unmetered-dynamic-support":
         return (
-            r17_dynamic_support_budget(root, overflow=True),
+            _r17_dynamic_support_budget(root, overflow=True),
             Damage(unmetered_dynamic_support=True),
             "no-finding",
         )
     if name == "unmetered-support-construction":
         return (
-            r17_support_serialization_budget(root, overflow=True),
+            _r17_support_serialization_budget(root, overflow=True),
             Damage(unmetered_support_construction=True),
             "no-finding",
         )
     if name == "restore-universal-ancestor-carry-scan":
         return (
-            r17_outside_c_neutral_parent(root),
+            _r17_outside_c_neutral_parent(root),
             Damage(
                 universal_ancestor_carry_scan=True,
                 reopen_outside_c_boundary_ancestry=True,
@@ -14552,67 +14607,67 @@ def control_builder(name: str, root: Path):
         )
     if name == "ignore-outside-C-carrier":
         return (
-            r17_carry_merge_fixture(root, variant="outside-single"),
+            _r17_carry_merge_fixture(root, variant="outside-single"),
             Damage(ignore_outside_c_collision=True),
             "no-finding",
         )
     if name == "ignore-absent-C-arm":
         return (
-            r17_carry_merge_fixture(root, variant="absent-arm"),
+            _r17_carry_merge_fixture(root, variant="absent-arm"),
             Damage(ignore_absent_c_arm=True),
             "no-finding",
         )
     if name == "ignore-persisted-outside-C-collision":
         return (
-            r17_persisted_carry_fixture(root, variant="outside-single"),
+            _r17_persisted_carry_fixture(root, variant="outside-single"),
             Damage(ignore_outside_c_collision=True),
             "no-finding",
         )
     if name == "ignore-persisted-absent-C-arm":
         return (
-            r17_persisted_carry_fixture(root, variant="valid-absent-arm"),
+            _r17_persisted_carry_fixture(root, variant="valid-absent-arm"),
             Damage(ignore_absent_c_arm=True),
             "no-finding",
         )
     if name == "first-parent-carry-proof":
         return (
-            r17_carry_merge_fixture(root, variant="incompatible"),
+            _r17_carry_merge_fixture(root, variant="incompatible"),
             Damage(first_parent_carry_only=True),
             "no-finding",
         )
     if name == "skip-carry-compatibility":
         return (
-            r17_carry_merge_fixture(root, variant="incompatible"),
+            _r17_carry_merge_fixture(root, variant="incompatible"),
             Damage(skip_carry_compatibility=True),
             "no-finding",
         )
     if name == "unmetered-cone-work":
         return (
-            r17_boundary_budget_fixture(root),
+            _r17_boundary_budget_fixture(root),
             Damage(unmetered_cone_work=True),
             "no-finding",
         )
     if name == "posthoc-budget-accounting":
         return (
-            r17_precharge_many_actions_budget(root),
+            _r17_precharge_many_actions_budget(root),
             Damage(posthoc_budget_accounting=True),
             "blocking-finding",
         )
     if name == "reopen-outside-C-boundary-ancestry":
         return (
-            r17_unopened_outside_c_ancestor(root),
+            _r17_unopened_outside_c_ancestor(root),
             Damage(reopen_outside_c_boundary_ancestry=True),
             "unreadable",
         )
     if name == "ignore-invalid-N-root":
         return (
-            r3_valid_plus_invalid_at_N(root),
+            _r3_valid_plus_invalid_at_N(root),
             Damage(sole_valid_ignores_competitors=True),
             "no-finding",
         )
     if name == "missing-all-parent-direct-validation":
         return (
-            direct_merge_fixture(
+            _direct_merge_fixture(
                 root,
                 "CONTROL-missing-all-parent-direct-validation",
                 parent_count=2,
@@ -14624,7 +14679,7 @@ def control_builder(name: str, root: Path):
         )
     if name == "supplier-authority-borrowing":
         return (
-            supplier_fixture(
+            _supplier_fixture(
                 root,
                 "CONTROL-supplier-authority-borrowing",
                 supplier_valid=False,
@@ -14636,25 +14691,25 @@ def control_builder(name: str, root: Path):
         )
     if name == "identity-multiplicity-collapsed-to-set":
         return (
-            p5_duplicate_at_c(root),
+            _p5_duplicate_at_c(root),
             Damage(collapse_multiplicity=True),
             "no-finding",
         )
     if name == "reopen-pre-C-genealogy":
         return (
-            p4_pre_c_origins(root),
+            _p4_pre_c_origins(root),
             Damage(reopen_pre_c_genealogy=True),
             "blocking-finding",
         )
     if name == "missing-post-event-continuity":
         return (
-            p17_post_event_reintroduction(root),
+            _p17_post_event_reintroduction(root),
             Damage(enforce_post_event_absence=False),
             "no-finding",
         )
     if name == "sole-valid-ignores-invalid-root":
         return (
-            r6_all_absent_roots(
+            _r6_all_absent_roots(
                 root, first_valid=True, second_kind="invalid"
             ),
             Damage(sole_valid_ignores_competitors=True),
@@ -14662,13 +14717,13 @@ def control_builder(name: str, root: Path):
         )
     if name == "omit-old-tip-human-binding":
         return (
-            r8_review_terminal_binding_conflict(root),
+            _r8_review_terminal_binding_conflict(root),
             Damage(omit_old_tip_human_binding=True),
             "no-finding",
         )
     if name == "literal-review-pending-treated-concrete":
         return (
-            r9_review_pending_binding(
+            _r9_review_pending_binding(
                 root, mode="direct", pending_field="Review target"
             ),
             Damage(treat_review_pending_as_concrete=True),
@@ -14676,7 +14731,7 @@ def control_builder(name: str, root: Path):
         )
     if name == "broad-review-pending-normalization":
         return (
-            r10_malformed_review_binding(
+            _r10_malformed_review_binding(
                 root,
                 mode="direct",
                 field="Review target",
@@ -14688,7 +14743,7 @@ def control_builder(name: str, root: Path):
         )
     if name == "omit-supplier-carrier-human-binding":
         return (
-            r13_review_parent_binding(
+            _r13_review_parent_binding(
                 root, mode="supplier", variant="target"
             ),
             Damage(omit_supplier_carrier_human_binding=True),
@@ -14696,13 +14751,13 @@ def control_builder(name: str, root: Path):
         )
     if name == "skip-preserved-state-validation":
         return (
-            r13_persisted_state(root, "claim-loss"),
+            _r13_persisted_state(root, "claim-loss"),
             Damage(skip_preserved_state_validation=True),
             "no-finding",
         )
     if name == "omit-unanswered-published-review-binding":
         return (
-            r14_review_carrier_binding(
+            _r14_review_carrier_binding(
                 root,
                 mode="supplier",
                 carrier_variant="target",
@@ -14713,25 +14768,25 @@ def control_builder(name: str, root: Path):
         )
     if name == "skip-persisted-frozen-skeleton":
         return (
-            r14_persisted_hidden_bytes(root),
+            _r14_persisted_hidden_bytes(root),
             Damage(skip_persisted_frozen_skeleton=True),
             "no-finding",
         )
     if name == "skip-persisted-candidate-continuity":
         return (
-            r14_persisted_intermediate_claim(root),
+            _r14_persisted_intermediate_claim(root),
             Damage(skip_persisted_candidate_continuity=True),
             "no-finding",
         )
     if name == "skip-old-side-continuity":
         return (
-            r15_old_side_continuity(root, "invalid-delete-recreate"),
+            _r15_old_side_continuity(root, "invalid-delete-recreate"),
             Damage(skip_old_side_continuity=True),
             "no-finding",
         )
     if name == "skip-supplier-support-certificate":
         return (
-            r16_supplier_support_fixture(root, "reverse-drop"),
+            _r16_supplier_support_fixture(root, "reverse-drop"),
             Damage(skip_supplier_support_certificate=True),
             "no-finding",
         )
@@ -14772,65 +14827,233 @@ def control_builder(name: str, root: Path):
     raise ValueError(name)
 
 
-_INTENDED_PUBLIC_API = (
-    "EventEndpoints",
-    "EventInputError",
-    "GitSpawnObserver",
-    "TrustedGitRunner",
-    "audit_event",
-    "event_endpoints",
-    "main",
-)
+_B_CAPABILITY_TYPES = frozenset({"_Fixture", "_StrategyBClassifier"})
 
 
-def _public_strategy_exposures(namespace: Mapping[str, Any]) -> list[str]:
-    """Name public local callables exposing Strategy B selection."""
-    exposed = []
-    for name, subject in namespace.items():
-        if name.startswith("_") or not callable(subject):
-            continue
-        if getattr(subject, "__module__", None) != __name__:
-            continue
-        try:
-            parameters = inspect.signature(subject).parameters
-            source = inspect.getsource(subject)
-        except (OSError, TypeError, ValueError):
-            continue
-        if (
-            "origin_strategy" in parameters
-            or any(
-                parameter.annotation in {"_Fixture", _Fixture}
-                for parameter in parameters.values()
+def _definition_annotation_names(node: ast.AST) -> set[str]:
+    """Return names used by one top-level callable's public type boundary."""
+    annotations = []
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        annotations.extend(
+            argument.annotation
+            for argument in (
+                *node.args.posonlyargs,
+                *node.args.args,
+                *node.args.kwonlyargs,
             )
-            or '"B"' in source
-            or "'B'" in source
+            if argument.annotation is not None
+        )
+        if node.args.vararg is not None:
+            annotations.append(node.args.vararg.annotation)
+        if node.args.kwarg is not None:
+            annotations.append(node.args.kwarg.annotation)
+        annotations.append(node.returns)
+    elif isinstance(node, ast.ClassDef):
+        annotations.extend(node.bases)
+    return {
+        child.id
+        for annotation in annotations
+        if annotation is not None
+        for child in ast.walk(annotation)
+        if isinstance(child, ast.Name)
+    }
+
+
+def _simple_assignment_name(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Assign) and len(node.targets) == 1:
+        target = node.targets[0]
+    elif isinstance(node, ast.AnnAssign):
+        target = node.target
+    else:
+        return None
+    return target.id if isinstance(target, ast.Name) else None
+
+
+def _assignment_value(node: ast.AST) -> ast.AST | None:
+    if isinstance(node, (ast.Assign, ast.AnnAssign)):
+        return node.value
+    return None
+
+
+def _strategy_surface_inventory(module: ast.Module) -> dict:
+    """Trace every module-local call/return/assignment route to Strategy B.
+
+    A B-capable node is a diagnostic fixture/type boundary, an explicit
+    Strategy-B selector, or any top-level definition/assigned alias whose AST
+    references one through calls, returns, annotations, or assigned tables.
+    """
+    definitions = {
+        node.name: node
+        for node in module.body
+        if isinstance(
+            node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+        )
+    }
+    assignments = {
+        name: node
+        for node in module.body
+        if (name := _simple_assignment_name(node)) is not None
+    }
+    symbols = {**assignments, **definitions}
+    symbol_names = set(symbols)
+    dependencies = {}
+    for name, node in symbols.items():
+        value = _assignment_value(node)
+        inspected = value if value is not None else node
+        dependencies[name] = {
+            child.id
+            for child in ast.walk(inspected)
+            if (
+                isinstance(child, ast.Name)
+                and isinstance(child.ctx, ast.Load)
+                and child.id in symbol_names
+                and child.id != name
+            )
+        }
+
+    direct = set(_B_CAPABILITY_TYPES).intersection(symbol_names)
+    for name, node in definitions.items():
+        if _definition_annotation_names(node).intersection(
+            _B_CAPABILITY_TYPES
         ):
-            exposed.append(name)
-    return sorted(exposed)
+            direct.add(name)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            parameters = (
+                *node.args.posonlyargs,
+                *node.args.args,
+                *node.args.kwonlyargs,
+            )
+            if any(
+                argument.arg == "origin_strategy"
+                for argument in parameters
+            ):
+                direct.add(name)
+            if any(
+                isinstance(default, ast.Constant)
+                and default.value == "B"
+                for default in (*node.args.defaults, *node.args.kw_defaults)
+            ):
+                direct.add(name)
+        for child in ast.walk(node):
+            if not isinstance(child, ast.Call):
+                continue
+            for keyword in child.keywords:
+                if (
+                    keyword.arg in {"origin_strategy", "strategy"}
+                    and isinstance(keyword.value, ast.Constant)
+                    and keyword.value.value == "B"
+                ):
+                    direct.add(name)
 
+    b_capable = set(direct)
+    changed = True
+    while changed:
+        changed = False
+        for name, referenced in dependencies.items():
+            if name not in b_capable and referenced.intersection(b_capable):
+                b_capable.add(name)
+                changed = True
 
-def _public_private_aliases(
-    namespace: Mapping[str, Any], private_subjects: tuple[Any, ...]
-) -> list[str]:
-    """Name public aliases of private Strategy B diagnostic surfaces."""
-    return sorted(
-        name
-        for name, subject in namespace.items()
-        if not name.startswith("_")
-        and any(subject is private for private in private_subjects)
+    callable_symbols = set(definitions)
+    changed = True
+    while changed:
+        changed = False
+        for name, node in assignments.items():
+            value = _assignment_value(node)
+            if (
+                name not in callable_symbols
+                and isinstance(value, ast.Name)
+                and value.id in callable_symbols
+            ):
+                callable_symbols.add(name)
+                changed = True
+
+    all_nodes = [
+        node
+        for node in module.body
+        if _simple_assignment_name(node) == "__all__"
+    ]
+    all_names = []
+    if len(all_nodes) == 1:
+        try:
+            candidate = ast.literal_eval(_assignment_value(all_nodes[0]))
+        except (TypeError, ValueError):
+            candidate = ()
+        if (
+            isinstance(candidate, tuple)
+            and all(type(name) is str for name in candidate)
+        ):
+            all_names = list(candidate)
+
+    public_callables = sorted(
+        name for name in callable_symbols if not name.startswith("_")
     )
+    public_roots = sorted(set(public_callables).union(all_names))
+    return {
+        "all_assignment_count": len(all_nodes),
+        "all_names": all_names,
+        "b_capable_nodes": sorted(b_capable),
+        "dependency_edges": sum(map(len, dependencies.values())),
+        "direct_b_nodes": sorted(direct),
+        "module_local_callables": sorted(callable_symbols),
+        "public_callable_roots": public_roots,
+        "public_exposures": sorted(set(public_roots).intersection(b_capable)),
+    }
+
+
+def _public_surface_observed_red(source: str) -> dict:
+    """Inject the two R32 regressions into parsed copies of the real module."""
+    main_variant = ast.parse(source)
+    public_main = next(
+        node
+        for node in main_variant.body
+        if isinstance(node, ast.FunctionDef) and node.name == "main"
+    )
+    public_main.body.insert(
+        0, ast.parse("_run_suite(Path('synthetic-public-main'))").body[0]
+    )
+
+    builder_variant = ast.parse(source)
+    builder_variant.body.extend(
+        ast.parse(
+            "def public_fixture_builder(root: Path) -> _Fixture:\n"
+            "    return _Fixture('probe', None, '', '', '', '', '')\n"
+        ).body
+    )
+    direct_variant = ast.parse(source)
+    direct_variant.body.extend(
+        ast.parse(
+            "def public_origin_selector(origin_strategy='U'):\n"
+            "    return origin_strategy\n"
+            "def public_b_selector(strategy='B'):\n"
+            "    return strategy\n"
+            "def public_fixture_runner(fixture: _Fixture):\n"
+            "    return fixture\n"
+        ).body
+    )
+    return {
+        "direct_strategy_selectors": (
+            _strategy_surface_inventory(direct_variant)["public_exposures"]
+        ),
+        "public_builder_returning_fixture": (
+            _strategy_surface_inventory(builder_variant)["public_exposures"]
+        ),
+        "public_main_to_private_suite": (
+            _strategy_surface_inventory(main_variant)["public_exposures"]
+        ),
+    }
 
 
 def _event_adapter_control(root: Path) -> dict:
     """Prove the public event boundary is session-local and result-owning."""
     fixtures = {
-        "clean": r19_event_workflow_fixture(
+        "clean": _r19_event_workflow_fixture(
             root / "clean", transport="push"
         ),
-        "blocking": r19_event_workflow_fixture(
+        "blocking": _r19_event_workflow_fixture(
             root / "blocking", transport="pre-push", attack=True
         ),
-        "unavailable": r19_event_workflow_fixture(
+        "unavailable": _r19_event_workflow_fixture(
             root / "unavailable",
             transport="pull-request-synchronize",
             failure="head-mismatch",
@@ -15622,7 +15845,7 @@ def _event_adapter_control(root: Path) -> dict:
             ),
         }
 
-    different_fixture = r19_event_workflow_fixture(
+    different_fixture = _r19_event_workflow_fixture(
         root / "concurrent-different", transport="push"
     )
     this_module = sys.modules[__name__]
@@ -15875,37 +16098,19 @@ def _event_adapter_control(root: Path) -> dict:
             _Classifier,
         )
     )
-    private_strategy_surfaces = (
-        _Fixture,
-        _Classifier,
-        _run_classifier,
-        _r18_origin_fixture,
-        _r18_origin_budget_fixture,
-        _scenario_builders,
-        _configure_typed_budget_fixture,
-        _run_fixture,
-        _run_suite,
+    surface_inventory = _strategy_surface_inventory(ast.parse(source))
+    surface_observed_red = _public_surface_observed_red(source)
+    expected_public_api = (
+        "EventEndpoints",
+        "EventInputError",
+        "GitSpawnObserver",
+        "TrustedGitRunner",
+        "audit_event",
+        "event_endpoints",
+        "main",
     )
-    intended_public_namespace = {
-        name: globals()[name] for name in _INTENDED_PUBLIC_API
-    }
-
-    def public_origin_selector(origin_strategy="U"):
-        return origin_strategy
-
-    def public_b_selector(strategy="B"):
-        return strategy
-
-    def public_fixture_runner(fixture: _Fixture):
-        return fixture
-
-    public_guard_probe = _public_strategy_exposures(
-        {
-            "public_b_selector": public_b_selector,
-            "public_fixture_runner": public_fixture_runner,
-            "public_origin_selector": public_origin_selector,
-        }
-    )
+    intended_public_namespace = {name: globals()[name] for name in __all__}
+    public_main_source = inspect.getsource(main)
     execution_seam["static_contract"] = {
         "ambient_popen_assignment_absent": re.search(
             r"subprocess\.Popen\s*=", source
@@ -15963,6 +16168,33 @@ def _event_adapter_control(root: Path) -> dict:
         "main_runner_has_no_default": (
             "git_runner" not in (main.__kwdefaults__ or {})
         ),
+        "exact_public_all": (
+            __all__ == expected_public_api
+            and surface_inventory["all_assignment_count"] == 1
+            and tuple(surface_inventory["all_names"]) == expected_public_api
+        ),
+        "private_diagnostic_dispatch_present": callable(
+            globals().get("_diagnostic_main")
+        ),
+        "public_main_event_only": (
+            all(
+                option in public_main_source
+                for option in (
+                    "--repo", "--event-kind", "--event-payload", "--budget"
+                )
+            )
+            and all(
+                option not in public_main_source
+                for option in (
+                    "--self-test",
+                    "--control",
+                    "--fixtures-dir",
+                    "--reverse-construction",
+                    "_run_suite",
+                    "_run_control",
+                )
+            )
+        ),
         "ordinary_cli_absent": (
             ("--" + "old") not in source
             and ("--" + "new") not in source
@@ -15973,33 +16205,52 @@ def _event_adapter_control(root: Path) -> dict:
         )
         is None,
         "intended_public_api_strategy_u_only": (
-            tuple(sorted(intended_public_namespace))
-            == tuple(sorted(_INTENDED_PUBLIC_API))
-            and not _public_strategy_exposures(
-                intended_public_namespace
+            tuple(intended_public_namespace) == expected_public_api
+            and all(
+                callable(subject)
+                and getattr(subject, "__module__", None) == __name__
+                for subject in intended_public_namespace.values()
+            )
+            and not set(__all__).intersection(
+                surface_inventory["b_capable_nodes"]
             )
         ),
-        "private_strategy_surface_no_public_aliases": not (
-            _public_private_aliases(
-                globals(), private_strategy_surfaces
-            )
+        "private_strategy_surface_no_public_aliases": all(
+            name.startswith("_")
+            for name in surface_inventory["b_capable_nodes"]
         ),
-        "public_strategy_guard_observed_red": public_guard_probe
-        == [
+        "public_strategy_guard_observed_red": surface_observed_red[
+            "direct_strategy_selectors"
+        ] == [
             "public_b_selector",
             "public_fixture_runner",
             "public_origin_selector",
         ],
-        "public_strategy_selector_absent": not (
-            _public_strategy_exposures(globals())
+        "public_main_private_suite_observed_red": surface_observed_red[
+            "public_main_to_private_suite"
+        ] == ["main"],
+        "public_builder_fixture_observed_red": surface_observed_red[
+            "public_builder_returning_fixture"
+        ] == ["public_fixture_builder"],
+        "public_strategy_selector_absent": not surface_inventory[
+            "public_exposures"
+        ],
+        "public_surface_ast_closed": (
+            not surface_inventory["public_exposures"]
+            and all(
+                name.startswith("_")
+                for name in surface_inventory["b_capable_nodes"]
+            )
         ),
+        "public_surface_ast_inventory": surface_inventory,
         "public_strategy_surface_u_only": (
             "origin_strategy" not in inspect.signature(audit_event).parameters
             and "origin_strategy" not in inspect.signature(main).parameters
             and "origin_strategy" not in inspect.signature(
                 _ordinary_audit
             ).parameters
-            and 'origin_strategy="U"' in inspect.getsource(_ordinary_audit)
+            and "_ProductionFixture(" in inspect.getsource(_ordinary_audit)
+            and "_StrategyBClassifier" not in audit_launch_sources
         ),
         "transaction_wrapper_absent": (
             ("_ResultBlind" + "Transaction") not in source
@@ -16377,7 +16628,10 @@ def _event_adapter_control(root: Path) -> dict:
         and all(
             value is True
             for key, value in execution_seam["static_contract"].items()
-            if key != "reconciler_launch_sites"
+            if key not in {
+                "public_surface_ast_inventory",
+                "reconciler_launch_sites",
+            }
         )
         and execution_seam["static_contract"]["reconciler_launch_sites"]
         == {"Popen": 2, "run": 65, "total": 67}
@@ -16812,7 +17066,7 @@ def _run_control(name: str, root: Path):
             and damaged["returncode_is_set"]
             and damaged["process_reaps"] == 1
         )
-        classification_fixture = ordinary_linear_fixture(
+        classification_fixture = _ordinary_linear_fixture(
             root / "metrics-publication", "metrics-publication", valid=True
         )
         classification = _run_classifier(classification_fixture)
@@ -16838,7 +17092,7 @@ def _run_control(name: str, root: Path):
         ObjectDatabase.__init__ = init_with_raising_close
         try:
             recovered_close_result = _run_classifier(
-                ordinary_linear_fixture(
+                _ordinary_linear_fixture(
                     root / "raising-close-classifier",
                     "raising-close-classifier",
                     valid=True,
@@ -16882,7 +17136,7 @@ def _run_control(name: str, root: Path):
         ObjectDatabase._raw_close_owned_fd = refuse_raw_close
         try:
             unclosed_result = _run_classifier(
-                ordinary_linear_fixture(
+                _ordinary_linear_fixture(
                     root / "unclosed-classifier",
                     "unclosed-classifier",
                     valid=True,
@@ -17326,7 +17580,7 @@ def _run_control(name: str, root: Path):
         ObjectDatabase.close = close_then_report_unproved_reap
         try:
             cleanup_failure_result = _run_classifier(
-                ordinary_linear_fixture(
+                _ordinary_linear_fixture(
                     root / "cleanup-failure",
                     "cleanup-failure",
                     valid=True,
@@ -17487,7 +17741,7 @@ def _run_control(name: str, root: Path):
             "stream_observation": observations,
         }
     if name == "locale-git-error-stream-equality":
-        fixture = r17_unreadable_boundary(root)
+        fixture = _r17_unreadable_boundary(root)
         stable = {}
         ambient = {}
         for locale in ("C", "fr_FR.UTF-8"):
@@ -17535,7 +17789,7 @@ def _run_control(name: str, root: Path):
                 "stable_reasons": stable_reasons,
             },
         }
-    fixture, damage, damaged_expected = control_builder(name, root)
+    fixture, damage, damaged_expected = _control_builder(name, root)
     baseline = _run_classifier(fixture)
     damaged = _run_classifier(fixture, damage)
     budget_observation = None
@@ -17626,24 +17880,24 @@ def _run_control(name: str, root: Path):
     return result
 
 
-def run_control(name: str, root: Path):
+def _run_control_in_session(name: str, root: Path):
     """Construct each control under a private reconciler fixture session."""
     with _fixture_repository_session(root):
         return _run_control(name, root)
 
 
-def prepare_root(path: Path):
+def _prepare_root(path: Path):
     if path.exists() and any(path.iterdir()):
         raise RuntimeError(f"fixture directory is not empty: {path}")
     path.mkdir(parents=True, exist_ok=True)
 
 
-def validate_scenario_aliases(results: list[dict]):
+def _validate_scenario_aliases(results: list[dict]):
     """Verify named adjudication scenarios without duplicating fixtures."""
     by_scenario = {result["scenario"]: result for result in results}
     inventory = []
     failures = []
-    for alias, expected in SCENARIO_ALIASES.items():
+    for alias, expected in _SCENARIO_ALIASES.items():
         result = by_scenario.get(expected["scenario"])
         if result is None:
             observed = {"scenario": None}
@@ -17699,13 +17953,13 @@ def _run_suite(root: Path, *, reverse_construction: bool = False):
         # production audit.  Give even this fixture-only phase a fresh private
         # module rather than reopening an ambient reconciler fallback.
         with _fixture_repository_session(fixture_root):
-            errors = validate_result(result)
+            errors = _validate_result(result)
         if errors:
             failures.append({"scenario": result["scenario"], "errors": errors})
         results.append(result)
     results.sort(key=lambda item: item["scenario"])
     for result in results:
-        emit_json(result)
+        _emit_json(result)
     by_scenario = {result["scenario"]: result for result in results}
     permutation_results = [
         by_scenario.get("R17-carry-compatible"),
@@ -17915,7 +18169,7 @@ def _run_suite(root: Path, *, reverse_construction: bool = False):
                 ],
             }
         )
-    emit_json(
+    _emit_json(
             {
                 "r17_parent_permutation": permutation_signatures,
                 "r17_persisted_parent_permutations": (
@@ -17938,26 +18192,26 @@ def _run_suite(root: Path, *, reverse_construction: bool = False):
                 ),
             }
         )
-    alias_inventory, alias_failures = validate_scenario_aliases(results)
+    alias_inventory, alias_failures = _validate_scenario_aliases(results)
     failures.extend(alias_failures)
-    emit_json(
+    _emit_json(
             {
                 "scenario_alias_inventory": alias_inventory,
                 "status": "PASS" if not alias_failures else "FAIL",
             }
         )
     controls = []
-    control_names = list(CONTROL_NAMES)
+    control_names = list(_CONTROL_NAMES)
     if reverse_construction:
         control_names.reverse()
     for index, name in enumerate(control_names, start=1):
-        result = run_control(name, root / f"control-{index:02d}")
+        result = _run_control_in_session(name, root / f"control-{index:02d}")
         controls.append(result)
         if result["status"] != "OBSERVED_RED":
             failures.append({"control": name, "errors": [result["status"]]})
     controls.sort(key=lambda item: item["control"])
     for result in controls:
-        emit_json(result)
+        _emit_json(result)
     summary = {
         "summary": "PASS" if not failures else "FAIL",
         "passed": len(results) - sum("scenario" in item for item in failures),
@@ -17986,7 +18240,7 @@ def _run_suite(root: Path, *, reverse_construction: bool = False):
         ).stdout.strip(),
         "failures": failures,
     }
-    emit_json(summary)
+    _emit_json(summary)
     return 0 if not failures else 1
 
 
@@ -18055,7 +18309,7 @@ def _ordinary_audit(
     budget_limit: int | None,
 ) -> dict:
     """Private Strategy-U classifier behind the typed event boundary."""
-    fixture = _Fixture(
+    fixture = _ProductionFixture(
         "ordinary-event-audit",
         RepositoryView(session.root),
         "",
@@ -18064,7 +18318,6 @@ def _ordinary_audit(
         N,
         "",
         budget_limit=budget_limit,
-        origin_strategy="U",
     )
     result = _Classifier(fixture, session=session).run()
     result.pop("expected_result", None)
@@ -18260,64 +18513,21 @@ def audit_event(
     return result
 
 
-def main(argv=None, *, git_runner: TrustedGitRunner):
+def _diagnostic_main(argv=None):
+    """Run the private fixture/control harness; never dispatched by __main__."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--reverse-construction", action="store_true")
-    parser.add_argument("--control", choices=CONTROL_NAMES)
+    parser.add_argument("--control", choices=_CONTROL_NAMES)
     parser.add_argument("--fixtures-dir", type=Path)
-    parser.add_argument("--repo", type=Path)
-    parser.add_argument("--event-kind")
-    parser.add_argument("--event-payload", type=Path)
-    parser.add_argument("--budget", type=int)
     arguments = parser.parse_args(argv)
-    event_mode = any(
-        value is not None
-        for value in (arguments.event_kind, arguments.event_payload)
-    )
-    selected = (
-        int(arguments.self_test)
-        + int(arguments.control is not None)
-        + int(event_mode)
-    )
+    selected = int(arguments.self_test) + int(arguments.control is not None)
     if selected != 1:
-        parser.error(
-            "choose exactly one of --self-test, --control, or "
-            "--repo/--event-kind/--event-payload"
-        )
-    if event_mode and None in (
-        arguments.repo,
-        arguments.event_kind,
-        arguments.event_payload,
-    ):
-        parser.error(
-            "event audit requires --repo, --event-kind, and --event-payload"
-        )
+        parser.error("choose exactly one of --self-test or --control")
     if arguments.reverse_construction and not arguments.self_test:
         parser.error("--reverse-construction requires --self-test")
-    if event_mode:
-        try:
-            payload = json.loads(arguments.event_payload.read_text("utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError) as error:
-            result = _typed_event_failure(
-                arguments.event_kind,
-                "coverage-unavailable: event payload could not be read: "
-                + type(error).__name__,
-                Metrics(),
-            )
-        else:
-            result = audit_event(
-                arguments.repo.resolve(),
-                arguments.event_kind,
-                payload,
-                git_runner=git_runner,
-                budget_limit=arguments.budget,
-            )
-        emit_json(result)
-        return result["audit_exit"]
-
     if arguments.fixtures_dir is not None:
-        prepare_root(arguments.fixtures_dir)
+        _prepare_root(arguments.fixtures_dir)
         root_context = contextlib.nullcontext(arguments.fixtures_dir)
     else:
         root_context = tempfile.TemporaryDirectory(
@@ -18330,9 +18540,38 @@ def main(argv=None, *, git_runner: TrustedGitRunner):
                 root,
                 reverse_construction=arguments.reverse_construction,
             )
-        result = run_control(arguments.control, root / "control")
-        emit_json(result)
+        result = _run_control_in_session(arguments.control, root / "control")
+        _emit_json(result)
         return 0 if result["status"] == "OBSERVED_RED" else 1
+
+
+def main(argv=None, *, git_runner: TrustedGitRunner):
+    """Run one event-only Strategy-U audit from immutable transport input."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--repo", required=True, type=Path)
+    parser.add_argument("--event-kind", required=True)
+    parser.add_argument("--event-payload", required=True, type=Path)
+    parser.add_argument("--budget", type=int)
+    arguments = parser.parse_args(argv)
+    try:
+        payload = json.loads(arguments.event_payload.read_text("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        result = _typed_event_failure(
+            arguments.event_kind,
+            "coverage-unavailable: event payload could not be read: "
+            + type(error).__name__,
+            Metrics(),
+        )
+    else:
+        result = audit_event(
+            arguments.repo.resolve(),
+            arguments.event_kind,
+            payload,
+            git_runner=git_runner,
+            budget_limit=arguments.budget,
+        )
+    _emit_json(result)
+    return result["audit_exit"]
 
 
 if __name__ == "__main__":
