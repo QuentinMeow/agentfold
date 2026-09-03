@@ -11,12 +11,16 @@ import argparse
 import contextlib
 import contextvars
 import dataclasses
+import datetime
 import errno
+import functools
 import gc
 import hashlib
 import importlib.util
+import inspect
 import io
 import json
+import operator
 import os
 from pathlib import Path
 import re
@@ -27,6 +31,7 @@ import sys
 import tempfile
 import threading
 from typing import Any, Callable, ContextManager, Iterable, Mapping, Protocol
+import uuid
 
 
 HERE = Path(__file__).resolve()
@@ -34,6 +39,7 @@ REPOSITORY = HERE.parents[5]
 RECONCILE_PATH = REPOSITORY / "automation/reconcile/reconcile.py"
 REAL_RUN = subprocess.run
 REAL_POPEN = subprocess.Popen
+FIXTURE_DATE = datetime.date(2026, 9, 2)
 
 
 class GitSpawnObserver(Protocol):
@@ -48,17 +54,11 @@ class GitSpawnObserver(Protocol):
         """Observe that production created the process with this PID."""
 
 
-GIT_SPAWN_OBSERVER: contextvars.ContextVar[GitSpawnObserver | None] = (
-    contextvars.ContextVar("production_contract_git_spawn_observer", default=None)
-)
-GIT_SPAWN_ACTIVE: contextvars.ContextVar[bool] = contextvars.ContextVar(
-    "production_contract_git_spawn_active", default=False
-)
-PRODUCTION_HELPER_TOKEN: contextvars.ContextVar[object | None] = (
-    contextvars.ContextVar("production_contract_helper_token", default=None)
-)
-PRODUCTION_HELPER_LOCK = threading.RLock()
-AUDIT_SINGLE_FLIGHT = threading.Lock()
+class TrustedGitRunner(Protocol):
+    """Explicit authority that creates one Git process without ambient lookup."""
+
+    def __call__(self, command, *args, **kwargs) -> subprocess.Popen:
+        """Create exactly the requested Git child."""
 
 
 def emit_json(value: Any):
@@ -72,19 +72,68 @@ def emit_json(value: Any):
     sys.stdout.buffer.write(encoded + b"\n")
 
 
-def load_reconciler():
+def load_reconciler(owner=None):
+    name = (
+        __name__.replace(".", "_")
+        + "_private_reconcile_"
+        + uuid.uuid4().hex
+    )
     spec = importlib.util.spec_from_file_location(
-        "production_contract_reconcile", RECONCILE_PATH
+        name, RECONCILE_PATH
     )
     if spec is None or spec.loader is None:
         raise RuntimeError(f"could not load {RECONCILE_PATH}")
     module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
+    try:
+        sys.modules[spec.name] = module
+        if owner is not None:
+            # Publish module ownership before executing imported code.  The
+            # loader removes its own registration on every throwable before
+            # this publication, and RepositorySession.close owns every
+            # throwable after it.
+            owner._reconcile_registration = (spec.name, module)
+            owner._reconcile_name = spec.name
+            owner.reconcile = module
+        spec.loader.exec_module(module)
+        # Fixture bytes must not expire when wall-clock UTC crosses midnight.
+        module.TODAY = FIXTURE_DATE
+    except BaseException:
+        if sys.modules.get(spec.name) is module:
+            sys.modules.pop(spec.name, None)
+        if (
+            owner is not None
+            and owner._reconcile_registration == (spec.name, module)
+        ):
+            owner._reconcile_registration = None
+            owner._reconcile_name = None
+            owner.reconcile = None
+        raise
     return module
 
 
-RECONCILE = load_reconciler()
+ACTIVE_RECONCILE = contextvars.ContextVar(
+    "production_contract_active_reconciler", default=None
+)
+
+
+class ReconcilerProxy:
+    """Resolve reconciler state from the currently active repository session."""
+
+    def __getattr__(self, name):
+        reconcile = ACTIVE_RECONCILE.get()
+        if reconcile is None:
+            raise Unreadable(
+                "production reconciler used outside a repository session"
+            )
+        return getattr(reconcile, name)
+
+
+RECONCILE = ReconcilerProxy()
+
+
+def _trusted_git_runner() -> TrustedGitRunner:
+    """Return the immutable process factory used by POC-owned CLI/tests."""
+    return REAL_POPEN
 
 
 class Unreadable(RuntimeError):
@@ -556,6 +605,30 @@ def cleanup_failure_text(error: BaseException) -> str:
     return f"{type(error).__name__} during resource cleanup"
 
 
+def _spawn_boundary(_name: str) -> None:
+    """Named no-op used by deterministic construction cancellation controls."""
+
+
+def _session_boundary(_name: str) -> None:
+    """Named no-op used by deterministic session cancellation controls."""
+
+
+def _pipe_boundary(_name: str) -> None:
+    """Named no-op used by deterministic pipe-publication controls."""
+
+
+def publish_call_result(target: list, callback: Callable[[], Any]) -> None:
+    """Call and publish a returned resource before Python regains control.
+
+    The nested C iterators close the CPython opcode gap between a resource
+    factory's return and ``STORE_FAST`` in its caller: the inner map invokes
+    the callback and the outer map appends its result to the already-published
+    list before either iterator returns to Python bytecode.  The caller still
+    owns ordinary exception cleanup once the list contains the result.
+    """
+    tuple(map(target.append, map(operator.call, (callback,))))
+
+
 def raise_deferred_cleanup(
     failures: list[BaseException], prefix: str
 ) -> None:
@@ -592,8 +665,9 @@ class OwnedPipe:
 
     label: str
     object_ref: Any | None
-    descriptor: int
+    descriptor: int | None
     state: str = "OPEN"
+    backing_ref: Any | None = None
 
 
 class OwnedPipeView:
@@ -620,45 +694,108 @@ class OwnedPipeView:
         close_owned_pipe(self._ownership, self, os.close)
 
 
+def close_raw_owned_pipe(
+    ownership: OwnedPipe,
+    raw_close: Callable[[int], None],
+) -> None:
+    """Consume one raw descriptor token before its only close attempt.
+
+    A throwing close is inherently ambiguous: the delegate may have closed the
+    descriptor before it threw.  The token therefore becomes UNKNOWN and is
+    never retried, even if the numeric descriptor is subsequently reused.
+    """
+    if ownership.state == "CLOSED":
+        return
+    if ownership.state == "UNKNOWN":
+        raise Unreadable(
+            f"Git child {ownership.label} descriptor state remains unknown"
+        )
+    descriptor = ownership.descriptor
+    if descriptor is None:
+        ownership.state = "UNKNOWN"
+        raise Unreadable(
+            f"Git child {ownership.label} lost its owned descriptor"
+        )
+    # UNKNOWN is durable before delegation.  A callback may close and then
+    # throw, so retaining the numeric fd would make a later pass unsafe after
+    # descriptor reuse.
+    ownership.state = "UNKNOWN"
+    ownership.descriptor = None
+    try:
+        raw_close(descriptor)
+    except BaseException:
+        raise
+    ownership.state = "CLOSED"
+
+
 def close_owned_pipe(
     ownership: OwnedPipe,
     current_pipe,
     raw_close: Callable[[int], None],
 ):
-    """Consume captured ownership once without re-querying a wrapper fd."""
-    if ownership.state != "OPEN":
+    """Consume captured ownership without granting authority to a replacement.
+
+    ``current_pipe`` is only an identity check.  A caller may have replaced the
+    public process attribute with arbitrary code that retains the captured
+    integer, closes it, reuses it, and then returns or throws.  Invoking that
+    replacement before the raw close would make the local integer unsafe, so
+    cleanup operates only on the internally captured non-owning view.
+    """
+    if ownership.state == "CLOSED":
         return
-    ownership.state = "RETIRING"
+    if ownership.state == "UNKNOWN":
+        raise Unreadable(
+            f"Git child {ownership.label} descriptor state remains unknown"
+        )
     descriptor = ownership.descriptor
     original = ownership.object_ref
-    if original is None:
+    if original is None or descriptor is None:
         ownership.state = "UNKNOWN"
+        ownership.descriptor = None
         raise Unreadable(
             f"Git child {ownership.label} has no captured pipe view"
         )
-    candidate = current_pipe if current_pipe is not None else original
+
+    # Consume the integer before *any* close callback.  The captured view was
+    # created with closefd=False, so closing it cannot consume or later reuse
+    # the OS descriptor.  Only raw_close receives the local integer, exactly
+    # once; any throwable from it leaves durable UNKNOWN ownership.
+    ownership.state = "UNKNOWN"
+    ownership.descriptor = None
     failures: list[BaseException] = []
-    try:
-        if candidate is original:
-            original._close_nonowning()
-        else:
-            candidate.close()
-    except BaseException as error:
-        failures.append(error)
-
-    if original is not candidate or not original.closed:
-        try:
-            original._close_nonowning()
-        except BaseException as error:
-            failures.append(error)
-
+    if current_pipe is not None and current_pipe is not original:
+        failures.append(
+            Unreadable(
+                f"Git child {ownership.label} public pipe no longer matches "
+                "captured ownership"
+            )
+        )
+    # The sole raw close precedes object cleanup.  Even an adversarial test
+    # double in the object slot therefore cannot close the old integer, reuse
+    # it, and trick the raw fallback into closing unrelated storage.
     try:
         raw_close(descriptor)
     except BaseException as error:
         failures.append(error)
-        ownership.state = "UNKNOWN"
     else:
         ownership.state = "CLOSED"
+    backing = ownership.backing_ref
+    if backing is None:
+        failures.append(
+            Unreadable(
+                f"Git child {ownership.label} lost its captured backing view"
+            )
+        )
+    else:
+        try:
+            # The immutable backing reference was captured before a public
+            # process attribute or the view's mutable delegate could be
+            # replaced.  Calling the built-in type implementation bypasses
+            # per-instance substitution.  The backing is closefd=False, so
+            # this can never consume a reused OS descriptor.
+            type(backing).close(backing)
+        except BaseException as error:
+            failures.append(error)
 
     cancellation = next(
         (error for error in failures if is_cancellation(error)), None
@@ -675,6 +812,7 @@ def close_owned_pipe(
 def cleanup_unclaimed_process(
     process: subprocess.Popen,
     owned_pipes: dict[str, OwnedPipe],
+    explicit_resources=None,
 ) -> None:
     """Reap and close a spawned child that an observer refused to accept."""
     failures: list[BaseException] = []
@@ -706,6 +844,10 @@ def cleanup_unclaimed_process(
             )
         except BaseException as error:
             failures.append(error)
+    try:
+        close_explicit_pipe_resources(explicit_resources)
+    except BaseException as error:
+        failures.append(error)
     raise_deferred_cleanup(failures, "Git spawn observer cleanup failed")
 
 
@@ -726,35 +868,82 @@ def retire_process_pipes(process: subprocess.Popen) -> None:
     raise_deferred_cleanup(failures, "Git child pipe cleanup failed")
 
 
-def prepare_explicit_parent_pipes(labels: tuple[str, ...]):
+def prepare_explicit_parent_pipes(
+    labels: tuple[str, ...],
+    *,
+    pipe_factory: Callable[[], tuple[int, int]] = os.pipe,
+    raw_close: Callable[[int], None] = os.close,
+    publication_boundary: Callable[[str], None] = _pipe_boundary,
+):
     """Create parent-owned fds and child-side ints without Popen PIPE owners."""
     resources = {}
-    opened = []
+    opened: list[OwnedPipe] = []
+    # Each raw pair is published by the C bridge before Python can receive a
+    # cancellation.  It remains a construction registry until return; the
+    # rollback path deduplicates it against any OwnedPipe tokens already made.
+    raw_pairs: list[tuple[int, int]] = []
     try:
         for label in labels:
-            read_fd, write_fd = os.pipe()
-            opened.extend((read_fd, write_fd))
+            publish_call_result(raw_pairs, pipe_factory)
+            publication_boundary("after-pipe-return-publication")
+            read_fd, write_fd = raw_pairs[-1]
+            read = OwnedPipe(f"{label}-read", None, read_fd)
+            write = OwnedPipe(f"{label}-write", None, write_fd)
+            opened.extend((read, write))
             if label == "stdin":
                 resources[label] = {
-                    "child": read_fd, "parent": write_fd, "mode": "wb"
+                    "child": read, "parent": write, "mode": "wb"
                 }
             elif label in {"stdout", "stderr"}:
                 resources[label] = {
-                    "child": write_fd, "parent": read_fd, "mode": "rb"
+                    "child": write, "parent": read, "mode": "rb"
                 }
             else:
                 raise ValueError(f"unsupported explicit pipe {label}")
         return resources
-    except BaseException:
-        for descriptor in opened:
-            with contextlib.suppress(OSError):
-                os.close(descriptor)
-        raise
+    except BaseException as primary:
+        failures: list[BaseException] = [primary]
+        by_descriptor = {
+            ownership.descriptor: ownership
+            for ownership in opened
+            if ownership.descriptor is not None
+        }
+        for pair in raw_pairs:
+            if (
+                not isinstance(pair, tuple)
+                or len(pair) != 2
+                or any(type(item) is not int for item in pair)
+            ):
+                failures.append(
+                    Unreadable("Git pipe factory returned an invalid pair")
+                )
+                continue
+            for descriptor in pair:
+                if descriptor not in by_descriptor:
+                    ownership = OwnedPipe(
+                        "construction-unpublished", None, descriptor
+                    )
+                    opened.append(ownership)
+                    by_descriptor[descriptor] = ownership
+        for ownership in by_descriptor.values():
+            try:
+                close_raw_owned_pipe(ownership, raw_close)
+            except BaseException as error:
+                failures.append(error)
+        raise_deferred_cleanup(failures, "Git pipe setup rollback failed")
 
 
-def attach_explicit_parent_pipes(process, resources, process_options=None):
+def attach_explicit_parent_pipes(
+    process,
+    resources,
+    process_options=None,
+    *,
+    raw_close: Callable[[int], None] = os.close,
+    owned=None,
+):
     """Close child-side parent copies and expose non-owning raw views."""
-    owned = {}
+    if owned is None:
+        owned = {}
     process_options = process_options or {}
     text_mode = bool(
         process_options.get("text")
@@ -763,13 +952,12 @@ def attach_explicit_parent_pipes(process, resources, process_options=None):
         or process_options.get("errors") is not None
     )
     for label, resource in resources.items():
-        os.close(resource["child"])
-        resource["child"] = None
+        close_raw_owned_pipe(resource["child"], raw_close)
         buffering = process_options.get("bufsize", -1)
         if text_mode and buffering == 1:
             buffering = -1
         file_object = io.open(
-            resource["parent"],
+            resource["parent"].descriptor,
             resource["mode"],
             buffering=buffering,
             closefd=False,
@@ -791,39 +979,59 @@ def attach_explicit_parent_pipes(process, resources, process_options=None):
                     and process_options.get("bufsize") == 1
                 ),
             )
-        ownership = OwnedPipe(label, None, resource["parent"])
+        ownership = resource["parent"]
+        ownership.label = label
         view = OwnedPipeView(file_object, ownership)
         ownership.object_ref = view
-        setattr(process, label, view)
+        ownership.backing_ref = file_object
+        # Publish raw ownership before exposing the view on the process.  A
+        # cancellation or adversarial __setattr__ after this point therefore
+        # still leaves the session with the one token that may close the fd.
         owned[label] = ownership
+        setattr(process, label, view)
     return owned
 
 
-def close_explicit_pipe_resources(resources):
+def close_explicit_pipe_resources(
+    resources,
+    *,
+    raw_close: Callable[[int], None] = os.close,
+):
+    failures: list[BaseException] = []
     for resource in (resources or {}).values():
         for name in ("child", "parent"):
-            descriptor = resource.get(name)
-            if descriptor is not None:
-                with contextlib.suppress(OSError):
-                    os.close(descriptor)
-                resource[name] = None
+            ownership = resource.get(name)
+            if ownership is not None:
+                try:
+                    close_raw_owned_pipe(ownership, raw_close)
+                except BaseException as error:
+                    failures.append(error)
+    raise_deferred_cleanup(failures, "Git pipe construction cleanup failed")
 
 
 def spawn_git_process(
+    session: "RepositorySession",
     command,
     *args,
-    metrics: Metrics,
     **kwargs,
 ) -> subprocess.Popen:
     """Create one production-owned Git child with result-blind observation."""
+    metrics = session.metrics
     if not is_git_command(command):
         raise ValueError("spawn_git_process accepts only Git commands")
-    if GIT_SPAWN_ACTIVE.get():
+    if kwargs.get("shell"):
+        raise Unreadable("trusted Git runner refuses shell execution")
+    requested_cwd = Path(kwargs.get("cwd", session.root)).resolve()
+    if requested_cwd != session.root:
+        raise Unreadable("trusted Git runner refuses a foreign working tree")
+    kwargs["cwd"] = session.root
+    if session._spawn_active:
         raise Unreadable("recursive Git process creation refused")
     exact_command = tuple(str(argument) for argument in command)
-    observer = GIT_SPAWN_OBSERVER.get()
-    token = GIT_SPAWN_ACTIVE.set(True)
+    observer = session.observer
+    session._spawn_active = True
     explicit_resources = None
+    process = None
     try:
         metrics.charge("git_process_attempts")
         if observer is not None:
@@ -851,37 +1059,76 @@ def spawn_git_process(
                 explicit_resources = prepare_explicit_parent_pipes(
                     explicit_parent_pipes
                 )
+                # Keep construction-time ownership in the session before the
+                # runner can create a child.  These are the same tokens later
+                # published on the process, so repeated cleanup is idempotent.
+                session.explicit_pipe_resources.append(explicit_resources)
                 for label, resource in explicit_resources.items():
-                    kwargs[label] = resource["child"]
+                    kwargs[label] = resource["child"].descriptor
             except BaseException as error:
                 if is_cancellation(error):
                     raise
                 raise Unreadable(
                     "Git child pipe setup failed: " + type(error).__name__
                 ) from error
+        process_index = len(session.processes)
         try:
-            process = REAL_POPEN(command, *args, **kwargs)
-        except BaseException as error:
-            close_explicit_pipe_resources(explicit_resources)
-            if is_cancellation(error):
-                raise
-            raise Unreadable(
-                "Git process factory failed: " + type(error).__name__
-            ) from error
-        try:
-            owned_pipes = attach_explicit_parent_pipes(
-                process, explicit_resources or {}, kwargs
+            # The C-backed publication bridge appends the returned child to
+            # the session registry before Python can execute the STORE_FAST
+            # that would otherwise lose it under opcode-level cancellation.
+            publish_call_result(
+                session.processes,
+                functools.partial(
+                    session.git_runner, command, *args, **kwargs
+                ),
             )
-        except BaseException:
-            # Trusted Popen returned a process but pipe ownership could not be
-            # captured.  Best-effort cleanup cannot use uncaptured numbers.
-            with contextlib.suppress(BaseException):
-                process.kill()
-            with contextlib.suppress(BaseException):
-                process.wait(timeout=5)
-            close_explicit_pipe_resources(explicit_resources)
-            raise
-        process._agentfold_owned_pipes = owned_pipes
+            _spawn_boundary("after-runner-publication")
+            process = session.processes[process_index]
+            _spawn_boundary("after-runner-return")
+        except BaseException as error:
+            failures: list[BaseException] = [error]
+            owned_process = process
+            if (
+                owned_process is None
+                and len(session.processes) > process_index
+            ):
+                owned_process = session.processes[process_index]
+            try:
+                if owned_process is None:
+                    close_explicit_pipe_resources(explicit_resources)
+                else:
+                    cleanup_unclaimed_process(
+                        owned_process,
+                        getattr(
+                            owned_process, "_agentfold_owned_pipes", {}
+                        ),
+                        explicit_resources,
+                    )
+            except BaseException as cleanup_error:
+                failures.append(cleanup_error)
+            cancellation = next(
+                (item for item in failures if is_cancellation(item)), None
+            )
+            if cancellation is not None:
+                cleanup_notes = [
+                    cleanup_failure_text(item)
+                    for item in failures
+                    if item is not cancellation
+                ]
+                if cleanup_notes:
+                    cancellation.add_note(
+                        "Git process factory cleanup failed: "
+                        + "; ".join(dict.fromkeys(cleanup_notes))
+                    )
+                raise cancellation
+            raise Unreadable(
+                "Git process factory failed: "
+                + "; ".join(
+                    dict.fromkeys(
+                        type(item).__name__ for item in failures
+                    )
+                )
+            ) from error
         metrics.observe("git_processes")
         if observer is not None:
             try:
@@ -891,7 +1138,9 @@ def spawn_git_process(
             except BaseException as error:
                 cleanup_error = None
                 try:
-                    cleanup_unclaimed_process(process, owned_pipes)
+                    cleanup_unclaimed_process(
+                        process, {}, explicit_resources
+                    )
                 except BaseException as observed_cleanup_error:
                     cleanup_error = observed_cleanup_error
                 if is_cancellation(error):
@@ -912,19 +1161,34 @@ def spawn_git_process(
                 raise Unreadable(
                     "Git spawn observer failed after process creation"
                 ) from error
+        owned_pipes = {}
+        try:
+            # Publish the map before attachment begins.  Each token is added
+            # before its public view, and the session also retains the source
+            # resource map, closing both cancellation gaps without a second
+            # numeric owner.
+            process._agentfold_owned_pipes = owned_pipes
+            attach_explicit_parent_pipes(
+                process,
+                explicit_resources or {},
+                kwargs,
+                owned=owned_pipes,
+            )
+            _spawn_boundary("after-pipe-attachment")
+        except BaseException as error:
+            failures = [error]
+            try:
+                cleanup_unclaimed_process(
+                    process, owned_pipes, explicit_resources
+                )
+            except BaseException as cleanup_error:
+                failures.append(cleanup_error)
+            raise_deferred_cleanup(
+                failures, "Git child pipe attachment failed"
+            )
         return process
     finally:
-        GIT_SPAWN_ACTIVE.reset(token)
-
-
-@contextlib.contextmanager
-def observe_git_spawns(observer: GitSpawnObserver | None):
-    """Bind one caller observer without delegating the audit operation."""
-    token = GIT_SPAWN_OBSERVER.set(observer)
-    try:
-        yield
-    finally:
-        GIT_SPAWN_OBSERVER.reset(token)
+        session._spawn_active = False
 
 
 @contextlib.contextmanager
@@ -941,78 +1205,349 @@ def temporary_environment(**updates):
                 os.environ[key] = value
 
 
-@contextlib.contextmanager
-def count_production_git(
-    metrics: Metrics, *, stable_git_diagnostics: bool = True
-):
-    """Count each Git child spawned by imported production helpers once."""
+class SessionSubprocess:
+    """Per-session subprocess facade for the imported production helper."""
 
-    invocation_token = object()
+    def __init__(self, session: "RepositorySession"):
+        self._session = session
 
-    def counted_popen(command, *args, **kwargs):
-        owned_invocation = (
-            PRODUCTION_HELPER_TOKEN.get() is invocation_token
+    PIPE = subprocess.PIPE
+    DEVNULL = subprocess.DEVNULL
+    TimeoutExpired = subprocess.TimeoutExpired
+
+    def __getattr__(self, name):
+        raise AttributeError(
+            f"session subprocess facade does not expose {name!r}"
         )
-        if owned_invocation and is_git_command(command):
-            encoded = sum(
-                len(str(argument).encode("utf-8", errors="surrogateescape"))
-                for argument in command
-            )
-            metrics.charge("production_helper_calls")
-            metrics.charge("production_helper_input_bytes", encoded)
-            command_text = tuple(str(argument) for argument in command)
-            if (
-                "rev-list" in command_text
-                and "--parents" in command_text
-                and "-n" in command_text
-                and "1" in command_text
-            ):
-                metrics.charge("production_parent_queries")
-            if stable_git_diagnostics:
-                kwargs["env"] = stable_git_environment(kwargs.get("env"))
-        if owned_invocation and is_git_command(command):
-            return spawn_git_process(
-                command,
-                *args,
-                metrics=metrics,
-                **kwargs,
-            )
-        return original_popen(command, *args, **kwargs)
 
-    with PRODUCTION_HELPER_LOCK:
-        original_popen = subprocess.Popen
-        subprocess.Popen = counted_popen
-        context_token = PRODUCTION_HELPER_TOKEN.set(invocation_token)
+    def Popen(self, command, *args, **kwargs):
+        return self._session.spawn_production_helper(
+            command, *args, **kwargs
+        )
+
+    def run(self, command, **kwargs):
+        return self._session.run_production_helper(command, **kwargs)
+
+
+class RepositorySession:
+    """All mutable state and child ownership for exactly one repository audit."""
+
+    def __init__(
+        self,
+        root: Path,
+        *,
+        git_runner: TrustedGitRunner,
+        stable_git_diagnostics: bool = True,
+    ):
+        if not callable(git_runner):
+            raise TypeError("trusted Git runner must be callable")
+        self.root = Path(root).resolve()
+        self.git_runner = git_runner
+        self.metrics = Metrics()
+        self.stable_git_diagnostics = stable_git_diagnostics
+        self.observer: GitSpawnObserver | None = None
+        self.object_database: ObjectDatabase | None = None
+        self.carry_proof_cache: dict[tuple[tuple, str], dict] = {}
+        self.processes: list[subprocess.Popen] = []
+        self.explicit_pipe_resources: list[dict] = []
+        self._spawn_active = False
+        self._active = False
+        self._closed = False
+        self._reconcile_name: str | None = None
+        self._reconcile_registration = None
+        self.reconcile = None
+        self._reconcile_token = None
+        self._prior_reconcile = None
+
+    def open(self) -> "RepositorySession":
+        if self._active:
+            return self
+        if self._closed:
+            raise Unreadable("repository session cannot be reopened")
         try:
-            yield
+            # load_reconciler publishes the sys.modules registration to this
+            # session before executing the imported module.  A cancellation
+            # after its return therefore cannot orphan the UUID entry.
+            reconcile = load_reconciler(self)
+            _session_boundary("after-reconciler-load")
+            reconcile.REPO = self.root
+            reconcile.QUEUE = self.root / "message-queue"
+            reconcile.RETRIES = reconcile.QUEUE / "needs-agent" / "retries"
+            reconcile.TASKS = self.root / "tasks"
+            reconcile.CONVERSATIONS = self.root / "history/conversations"
+            reconcile.MEMORY = self.root / "memory"
+            reconcile.CHANGE_RANGE = None
+            reconcile.DISPLACED_TIP = None
+            reconcile.ACTIVE_TRANSITIONS = set()
+            reconcile.ACTIVE_TASK_ID = None
+            reconcile.TODAY = FIXTURE_DATE
+            reconcile.subprocess = SessionSubprocess(self)
+            reconcile.scope_immutable_git_caches()
+            self._prior_reconcile = ACTIVE_RECONCILE.get()
+            # Mark the fallback owner before ContextVar.set.  If cancellation
+            # lands after set but before its token is published, close() can
+            # restore the captured prior value without the lost token.
+            self._active = True
+            token = ACTIVE_RECONCILE.set(reconcile)
+            _session_boundary("after-context-set")
+            self._reconcile_token = token
+            return self
+        except BaseException as primary:
+            failures: list[BaseException] = [primary]
+            try:
+                self.close()
+            except BaseException as cleanup_error:
+                failures.append(cleanup_error)
+            raise_deferred_cleanup(
+                failures, "repository session setup failed"
+            )
+
+    def __enter__(self) -> "RepositorySession":
+        return self.open()
+
+    def __exit__(self, exc_type, exc, traceback):
+        self.close()
+        return False
+
+    def _precharge_production_helper(self, command, kwargs):
+        if not is_git_command(command):
+            raise Unreadable(
+                "imported production helper requested a non-Git child"
+            )
+        encoded = sum(
+            len(str(argument).encode("utf-8", errors="surrogateescape"))
+            for argument in command
+        )
+        self.metrics.charge("production_helper_calls")
+        self.metrics.charge("production_helper_input_bytes", encoded)
+        command_text = tuple(str(argument) for argument in command)
+        if (
+            "rev-list" in command_text
+            and "--parents" in command_text
+            and "-n" in command_text
+            and "1" in command_text
+        ):
+            self.metrics.charge("production_parent_queries")
+        if self.stable_git_diagnostics:
+            kwargs["env"] = stable_git_environment(kwargs.get("env"))
+
+    def spawn_production_helper(self, command, *args, **kwargs):
+        self._precharge_production_helper(command, kwargs)
+        return spawn_git_process(
+            self,
+            command,
+            *args,
+            **kwargs,
+        )
+
+    def run_production_helper(self, command, **kwargs):
+        self._precharge_production_helper(command, kwargs)
+        return self.run_git_process(command, **kwargs)
+
+    def run_git_process(self, command, **kwargs):
+        """A subprocess.run-compatible path built on the injected runner."""
+        input_value = kwargs.pop("input", None)
+        capture_output = kwargs.pop("capture_output", False)
+        timeout = kwargs.pop("timeout", None)
+        check = kwargs.pop("check", False)
+        if input_value is not None:
+            if kwargs.get("stdin") is not None:
+                raise ValueError("stdin and input arguments may not both be used")
+            kwargs["stdin"] = subprocess.PIPE
+        if capture_output:
+            if kwargs.get("stdout") is not None or kwargs.get("stderr") is not None:
+                raise ValueError(
+                    "stdout and stderr arguments may not be used with capture_output"
+                )
+            kwargs["stdout"] = subprocess.PIPE
+            kwargs["stderr"] = subprocess.PIPE
+        process = spawn_git_process(
+            self,
+            command,
+            **kwargs,
+        )
+        primary_error = None
+        cleanup_failures: list[BaseException] = []
+        stdout = None
+        stderr = None
+        try:
+            stdout, stderr = process.communicate(input_value, timeout=timeout)
+        except BaseException as error:
+            primary_error = error
+            try:
+                cleanup_unclaimed_process(
+                    process,
+                    getattr(process, "_agentfold_owned_pipes", {}),
+                )
+            except BaseException as cleanup_error:
+                cleanup_failures.append(cleanup_error)
+        else:
+            try:
+                retire_process_pipes(process)
+            except BaseException as cleanup_error:
+                cleanup_failures.append(cleanup_error)
+
+        failures = (
+            ([primary_error] if primary_error is not None else [])
+            + cleanup_failures
+        )
+        cancellation = next(
+            (error for error in failures if is_cancellation(error)), None
+        )
+        if cancellation is not None:
+            secondary = [
+                cleanup_failure_text(error)
+                for error in failures
+                if error is not cancellation
+            ]
+            if secondary:
+                cancellation.add_note(
+                    "Git child communication cleanup: "
+                    + "; ".join(dict.fromkeys(secondary))
+                )
+            raise cancellation
+        if primary_error is not None:
+            if cleanup_failures:
+                raise Unreadable(
+                    "Git child communication cleanup failed after "
+                    f"{type(primary_error).__name__}: "
+                    + "; ".join(
+                        dict.fromkeys(
+                            cleanup_failure_text(error)
+                            for error in cleanup_failures
+                        )
+                    )
+                ) from primary_error
+            raise primary_error
+        raise_deferred_cleanup(
+            cleanup_failures, "Git child communication cleanup failed"
+        )
+        returncode = process.poll()
+        if check and returncode:
+            raise subprocess.CalledProcessError(
+                returncode, command, output=stdout, stderr=stderr
+            )
+        return subprocess.CompletedProcess(
+            command, returncode, stdout, stderr
+        )
+
+    def create_object_database(
+        self,
+        *,
+        damage: Damage | None = None,
+        stable_git_diagnostics: bool = True,
+    ) -> "ObjectDatabase":
+        if self.object_database is not None:
+            raise Unreadable("repository session already owns an object database")
+        database = ObjectDatabase(
+            self,
+            damage=damage,
+            stable_git_diagnostics=stable_git_diagnostics,
+        )
+        self.object_database = database
+        return database
+
+    def close_object_database(self) -> None:
+        database = self.object_database
+        self.object_database = None
+        if database is not None:
+            database.close()
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        failures: list[BaseException] = []
+        try:
+            try:
+                self.close_object_database()
+            except BaseException as error:
+                failures.append(error)
+            if self.reconcile is not None:
+                for cleanup in (
+                    self.reconcile.close_git_cat_file,
+                    self.reconcile.stop_git_snapshot_cache,
+                ):
+                    try:
+                        cleanup()
+                    except BaseException as error:
+                        failures.append(error)
+            for process in self.processes:
+                try:
+                    if process.poll() is None:
+                        process.terminate()
+                        try:
+                            process.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            process.wait(timeout=5)
+                except BaseException as error:
+                    failures.append(error)
+                    try:
+                        if process.poll() is None:
+                            process.kill()
+                        process.wait(timeout=5)
+                    except BaseException as cleanup_error:
+                        failures.append(cleanup_error)
+                try:
+                    retire_process_pipes(process)
+                except BaseException as error:
+                    failures.append(error)
+            # Construction resource maps use the same one-shot tokens as the
+            # process maps.  Keeping both references until final cleanup makes
+            # cancellation before or during attachment safe and idempotent.
+            for resources in self.explicit_pipe_resources:
+                try:
+                    close_explicit_pipe_resources(resources)
+                except BaseException as error:
+                    failures.append(error)
         finally:
-            PRODUCTION_HELPER_TOKEN.reset(context_token)
-            subprocess.Popen = original_popen
+            self._closed = True
+            try:
+                if self._active and self._reconcile_token is not None:
+                    ACTIVE_RECONCILE.reset(self._reconcile_token)
+                elif (
+                    self._active
+                    and self.reconcile is not None
+                    and ACTIVE_RECONCILE.get() is self.reconcile
+                ):
+                    # ContextVar.set completed but its token was interrupted
+                    # before publication.  Restore the exact captured value;
+                    # no later session can share this execution context.
+                    ACTIVE_RECONCILE.set(self._prior_reconcile)
+            except BaseException as error:
+                failures.append(error)
+            self._active = False
+            self._closed = True
+            try:
+                registration = self._reconcile_registration
+                if registration is not None:
+                    name, module = registration
+                    if sys.modules.get(name) is module:
+                        sys.modules.pop(name, None)
+                elif (
+                    self._reconcile_name is not None
+                    and sys.modules.get(self._reconcile_name) is self.reconcile
+                ):
+                    sys.modules.pop(self._reconcile_name, None)
+            except BaseException as error:
+                failures.append(error)
+            self.processes.clear()
+            self.explicit_pipe_resources.clear()
+            self.carry_proof_cache.clear()
+            self._reconcile_registration = None
+            self._reconcile_name = None
+            self._reconcile_token = None
+            self._prior_reconcile = None
+            self.reconcile = None
+        raise_deferred_cleanup(failures, "repository session cleanup failed")
 
 
 @contextlib.contextmanager
-def reconciler_repository(root: Path):
-    names = {
-        "REPO": root,
-        "QUEUE": root / "message-queue",
-        "TASKS": root / "tasks",
-        "CONVERSATIONS": root / "history/conversations",
-        "MEMORY": root / "memory",
-        "CHANGE_RANGE": None,
-        "DISPLACED_TIP": None,
-    }
-    with PRODUCTION_HELPER_LOCK:
-        saved = {name: getattr(RECONCILE, name) for name in names}
-        for name, value in names.items():
-            setattr(RECONCILE, name, value)
-        RECONCILE.scope_immutable_git_caches()
-        try:
-            yield
-        finally:
-            RECONCILE.close_git_cat_file()
-            for name, value in saved.items():
-                setattr(RECONCILE, name, value)
-            RECONCILE.scope_immutable_git_caches()
+def _fixture_repository_session(root: Path):
+    """Give fixture-only direct reconciler probes the same isolated boundary."""
+    session = RepositorySession(root, git_runner=_trusted_git_runner())
+    with session:
+        yield session
 
 
 class GitRepository:
@@ -1022,6 +1557,7 @@ class GitRepository:
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True)
         self.clock = 0
+        self.rendered_retries: dict[str, str] = {}
         self.run("init", "-q", "-b", "main")
         self.run("config", "user.name", "Production Contract POC")
         self.run("config", "user.email", "production-contract@example.invalid")
@@ -1173,16 +1709,14 @@ class GitRepository:
 
 
 def run_git(
-    root: Path,
-    metrics: Metrics,
+    session: RepositorySession,
     *arguments,
     check=True,
     stable_git_diagnostics=True,
 ):
-    # count_production_git observes this subprocess at the Popen boundary.
-    result = REAL_RUN(
+    result = session.run_git_process(
         ["git", *arguments],
-        cwd=root,
+        cwd=session.root,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -1203,11 +1737,12 @@ def run_git(
 
 def _terminate_and_reap(
     process: subprocess.Popen,
-    metrics: Metrics,
+    session: RepositorySession,
     *,
     counter_prefix: str,
 ):
     """Terminate a refused Git child and prove that it was reaped."""
+    metrics = session.metrics
     failures: list[BaseException] = []
     try:
         if process.poll() is None:
@@ -1232,17 +1767,17 @@ def _terminate_and_reap(
 
 
 def bounded_git_lines(
-    root: Path,
-    metrics: Metrics,
+    session: RepositorySession,
     arguments: tuple[str, ...],
     *,
     counter_prefix: str,
     buffered_damage: bool = False,
     stable_git_diagnostics: bool = True,
     line_callback: Callable[[bytes], None] | None = None,
-    command_prefix: tuple[str, ...] = ("git",),
 ) -> tuple[int, tuple[bytes, ...], bytes]:
     """Read one Git command with bounded chunks and transactional output."""
+    root = session.root
+    metrics = session.metrics
     stream_chunk_bytes = 256
     output_counter = f"{counter_prefix}_output_bytes"
     line_counter = f"{counter_prefix}_line_bytes"
@@ -1250,8 +1785,7 @@ def bounded_git_lines(
     lines_counter = f"{counter_prefix}_lines"
     if buffered_damage:
         result = run_git(
-            root,
-            metrics,
+            session,
             *arguments,
             check=False,
             stable_git_diagnostics=stable_git_diagnostics,
@@ -1275,7 +1809,7 @@ def bounded_git_lines(
             result.stderr.encode("utf-8", errors="surrogateescape"),
         )
 
-    command = [*command_prefix, *arguments]
+    command = ["git", *arguments]
     process_arguments = {
         "cwd": root,
         "stdout": subprocess.PIPE,
@@ -1283,9 +1817,7 @@ def bounded_git_lines(
         "env": stable_git_environment() if stable_git_diagnostics else None,
     }
     process = (
-        spawn_git_process(command, metrics=metrics, **process_arguments)
-        if is_git_command(command)
-        else REAL_POPEN(command, **process_arguments)
+        spawn_git_process(session, command, **process_arguments)
     )
     assert process.stdout is not None
     assert process.stderr is not None
@@ -1382,7 +1914,7 @@ def bounded_git_lines(
         return returncode, (), bytes(stderr)
     except (BudgetExceeded, Unreadable):
         _terminate_and_reap(
-            process, metrics, counter_prefix=counter_prefix
+            process, session, counter_prefix=counter_prefix
         )
         raise
     finally:
@@ -1395,22 +1927,22 @@ class ObjectDatabase:
 
     def __init__(
         self,
-        root: Path,
-        metrics: Metrics,
+        session: RepositorySession,
         *,
         damage: Damage | None = None,
         stable_git_diagnostics: bool = True,
     ):
-        self.root = root
-        self.metrics = metrics
+        self.session = session
+        self.root = session.root
+        self.metrics = session.metrics
         self.damage = damage or Damage()
-        metrics.charge("batch_processes")
+        self.metrics.charge("batch_processes")
         self.process = spawn_git_process(
+            session,
             ["git", "--no-replace-objects", "cat-file", "--batch"],
-            metrics=metrics,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            cwd=root,
+            cwd=self.root,
             stderr=subprocess.DEVNULL,
             env=(
                 stable_git_environment()
@@ -1785,16 +2317,17 @@ class Graph:
 
     def __init__(
         self,
-        root: Path,
+        session: RepositorySession,
         O: str,
         N: str,
         objects: ObjectDatabase,
-        metrics: Metrics,
         *,
         reopen_outside_c_boundary_ancestry: bool = False,
         buffered_graph_output: bool = False,
         stable_git_diagnostics: bool = True,
     ):
+        root = session.root
+        metrics = session.metrics
         self.root = root
         self.O = O
         self.N = N
@@ -1815,8 +2348,7 @@ class Graph:
             shallow_values.append(value)
 
         shallow_returncode, _shallow_lines, shallow_stderr = bounded_git_lines(
-            root,
-            metrics,
+            session,
             ("rev-parse", "--is-shallow-repository"),
             counter_prefix="shallow",
             stable_git_diagnostics=stable_git_diagnostics,
@@ -1865,8 +2397,7 @@ class Graph:
             merge_bases.append(oid)
 
         base_returncode, _base_lines, base_stderr = bounded_git_lines(
-            root,
-            metrics,
+            session,
             base_arguments,
             counter_prefix="merge_base",
             stable_git_diagnostics=stable_git_diagnostics,
@@ -1938,8 +2469,7 @@ class Graph:
         try:
             listing_returncode, _listing_lines, listing_stderr = (
                 bounded_git_lines(
-                    root,
-                    metrics,
+                    session,
                     tuple([*listing_arguments, O, N, f"^{self.C}"]),
                     counter_prefix="graph",
                     buffered_damage=buffered_graph_output,
@@ -2032,10 +2562,17 @@ class Graph:
 class Classifier:
     """In-memory provenance over one enumerated graph and cached snapshots."""
 
-    def __init__(self, fixture: Fixture, damage: Damage | None = None):
+    def __init__(
+        self,
+        fixture: Fixture,
+        damage: Damage | None = None,
+        *,
+        session: RepositorySession,
+    ):
         self.fixture = fixture
         self.damage = damage or Damage()
-        self.metrics = Metrics()
+        self.session = session
+        self.metrics = session.metrics
         self.metrics.configure_budget(
             None if self.damage.unmetered_cone_work else fixture.budget_limit,
             limits=(
@@ -2049,7 +2586,7 @@ class Classifier:
         )
         self.objects: ObjectDatabase | None = None
         self.graph: Graph | None = None
-        self.carry_proof_cache: dict[tuple[tuple, str], dict] = {}
+        self.carry_proof_cache = session.carry_proof_cache
         if fixture.origin_strategy not in {"U", "B"}:
             raise ValueError(
                 f"unsupported origin strategy {fixture.origin_strategy!r}"
@@ -5323,6 +5860,7 @@ class Classifier:
 
     def run(self) -> dict:
         fixture = self.fixture
+        session = self.session
         base = {
             "scenario": fixture.scenario,
             "C": None,
@@ -5338,38 +5876,28 @@ class Classifier:
         objects = None
         published_result = None
         try:
-            with reconciler_repository(
-                fixture.repo.root
-            ), count_production_git(
-                self.metrics,
+            objects = session.create_object_database(
+                damage=self.damage,
                 stable_git_diagnostics=(
                     not self.damage.ambient_git_diagnostics
                 ),
-            ):
-                objects = ObjectDatabase(
-                    fixture.repo.root,
-                    self.metrics,
-                    damage=self.damage,
-                    stable_git_diagnostics=(
-                        not self.damage.ambient_git_diagnostics
-                    ),
-                )
-                self.objects = objects
-                self.graph = Graph(
-                    fixture.repo.root,
-                    fixture.O,
-                    fixture.N,
-                    objects,
-                    self.metrics,
-                    reopen_outside_c_boundary_ancestry=(
-                        self.damage.reopen_outside_c_boundary_ancestry
-                    ),
-                    buffered_graph_output=self.damage.buffered_graph_output,
-                    stable_git_diagnostics=(
-                        not self.damage.ambient_git_diagnostics
-                    ),
-                )
-                base["C"] = self.graph.C
+            )
+            self.objects = objects
+            self.graph = Graph(
+                session,
+                fixture.O,
+                fixture.N,
+                objects,
+                reopen_outside_c_boundary_ancestry=(
+                    self.damage.reopen_outside_c_boundary_ancestry
+                ),
+                buffered_graph_output=self.damage.buffered_graph_output,
+                stable_git_diagnostics=(
+                    not self.damage.ambient_git_diagnostics
+                ),
+            )
+            base["C"] = self.graph.C
+            if self.graph is not None:
                 if fixture.expected_C:
                     base["derived_C_matches_fixture"] = (
                         self.graph.C == fixture.expected_C
@@ -5534,12 +6062,15 @@ class Classifier:
             }
             return published_result
         finally:
-            cleanup_error = None
+            cleanup_failures: list[BaseException] = []
             if objects is not None:
                 try:
-                    objects.close()
+                    session.close_object_database()
                 except BaseException as error:
-                    cleanup_error = error
+                    cleanup_failures.append(error)
+            cleanup_error = (
+                cleanup_failures[0] if cleanup_failures else None
+            )
             if published_result is not None:
                 if cleanup_error is not None:
                     if is_cancellation(cleanup_error):
@@ -5572,6 +6103,79 @@ class Classifier:
                 published_result["metrics"] = self.metrics.as_dict()
             elif cleanup_error is not None:
                 raise cleanup_error
+
+
+def run_classifier(fixture: Fixture, damage: Damage | None = None) -> dict:
+    """Run a fixture in one explicit, fully cleaned repository session."""
+    session = RepositorySession(
+        fixture.repo.root,
+        git_runner=_trusted_git_runner(),
+        stable_git_diagnostics=(
+            not (damage or Damage()).ambient_git_diagnostics
+        ),
+    )
+    metrics = session.metrics
+    result = None
+    body_error = None
+    cleanup_error = None
+    session.open()
+    try:
+        result = Classifier(fixture, damage, session=session).run()
+    except BaseException as error:
+        body_error = error
+    try:
+        session.close()
+    except BaseException as error:
+        cleanup_error = error
+    cancellation = next(
+        (
+            error
+            for error in (body_error, cleanup_error)
+            if error is not None and is_cancellation(error)
+        ),
+        None,
+    )
+    if cancellation is not None:
+        raise cancellation
+    if body_error is not None:
+        raise body_error
+    if cleanup_error is not None:
+        base = {
+            key: value
+            for key, value in (result or {}).items()
+            if key
+            in {
+                "scenario",
+                "C",
+                "O",
+                "N",
+                "expected_result",
+                "input_contract",
+                "details",
+            }
+        }
+        result = {
+            **base,
+            "audit_exit": 2,
+            "classification": "unreadable",
+            "evidence_verdict": {
+                "status": "unreadable",
+                "reason": (
+                    "repository session cleanup failed: "
+                    + cleanup_failure_text(cleanup_error)
+                ),
+            },
+            "event_mode": "none",
+            "authority_edges": [],
+            "propagation_edges": [],
+            "mutation_edges": [],
+            "support_checks": [],
+            "carry_proofs": [],
+            "actions": [],
+        }
+    if result is not None:
+        result["metrics"] = metrics.as_dict()
+    return result
 
 
 def queue_path(
@@ -7784,7 +8388,7 @@ def r17_outside_c_neutral_parent(root: Path) -> Fixture:
     old_patch = repo.run("diff", "--binary", C, O).stdout
     replayed_patch = repo.run("diff", "--binary", deletion, N).stdout
     bases = repo.run("merge-base", "--all", O, N).stdout.splitlines()
-    with reconciler_repository(repo.root):
+    with _fixture_repository_session(repo.root):
         deletion_problem = RECONCILE.queue_deletion_problem(
             path,
             repo.run("show", f"{K}:{path}").stdout,
@@ -8419,7 +9023,7 @@ def r15_old_side_continuity(root: Path, variant: str) -> Fixture:
         == repo.run("show", f"{N}:{path}").stdout
     )
     if variant == "valid-delete-recreate":
-        with reconciler_repository(repo.root):
+        with _fixture_repository_session(repo.root):
             details["deletion_problem"] = RECONCILE.queue_deletion_problem(
                 path,
                 repo.run(
@@ -9219,7 +9823,9 @@ def generated_retry(repo: GitRepository, bad_path: str):
         "message-queue/needs-agent/retries/"
         f"blocking-{RECONCILE.finding_key(finding)}.md"
     )
-    repo.write(path, RECONCILE.retry_text(finding))
+    payload = RECONCILE.retry_text(finding)
+    repo.rendered_retries[path] = payload
+    repo.write(path, payload)
     return path
 
 
@@ -9247,11 +9853,7 @@ def pcx15_generated_retry(root: Path) -> Fixture:
     N = feature(repo, "pcx15-old")
     retry_identity = RECONCILE.queue_action_identity(
         retry,
-        RECONCILE.retry_text(
-            RECONCILE.Finding(
-                "queue-name", Path(bad), "bad name", "rename it"
-            )
-        ),
+        repo.rendered_retries[retry],
     )
     return Fixture(
         "PCX-15-generated-retry-supplier",
@@ -9264,6 +9866,10 @@ def pcx15_generated_retry(root: Path) -> Fixture:
         {
             "retry_path": retry,
             "production_retry_identity": list(retry_identity),
+            "fixture_date": FIXTURE_DATE.isoformat(),
+            "retry_payload_sha256": hashlib.sha256(
+                repo.rendered_retries[retry].encode("utf-8")
+            ).hexdigest(),
         },
     )
 
@@ -9459,7 +10065,7 @@ def r16_supplier_support_fixture(root: Path, variant: str) -> Fixture:
             removes=(path,),
         )
     N = feature(repo, f"{label}-new")
-    with reconciler_repository(repo.root):
+    with _fixture_repository_session(repo.root):
         source_problem = RECONCILE.queue_deletion_problem(
             path,
             repo.run("show", f"{authority_parent}:{path}").stdout,
@@ -9534,7 +10140,7 @@ def r16_earlier_evidence_reversal(root: Path) -> Fixture:
     authority_text = repo.run(
         "show", f"{authority_parent}:{path}"
     ).stdout
-    with reconciler_repository(repo.root):
+    with _fixture_repository_session(repo.root):
         source_problem = RECONCILE.queue_deletion_problem(
             path,
             authority_text,
@@ -9848,7 +10454,7 @@ def pcx18_many_actions(root: Path) -> Fixture:
 def r17_precharge_many_actions_budget(root: Path) -> Fixture:
     """Refuse P22's first over-budget operation before later work starts."""
     fixture = pcx18_many_actions(root)
-    reference = Classifier(fixture).run()["metrics"]
+    reference = run_classifier(fixture)["metrics"]
     fixture.scenario = "R17-precharge-P22-budget"
     fixture.expected = "blocking-finding"
     fixture.budget_limits = {"object_reads": 133}
@@ -10029,7 +10635,7 @@ def budget_fixture(root: Path, *, overflow: bool) -> Fixture:
         N,
         "no-finding",
     )
-    probe = Classifier(fixture).run()
+    probe = run_classifier(fixture)
     measured = probe["metrics"]
     max_work = max(measured.values())
     fixture.expected = "blocking-finding" if overflow else "no-finding"
@@ -10055,7 +10661,7 @@ def configure_typed_budget_fixture(
     overflow: bool,
 ) -> Fixture:
     """Derive one deterministic exact or exact-minus-one typed work cap."""
-    probe = Classifier(fixture).run()
+    probe = run_classifier(fixture)
     if probe["classification"] != fixture.expected:
         raise AssertionError(
             f"unbudgeted probe for {scenario} changed classification"
@@ -10879,7 +11485,7 @@ def r18_origin_budget_fixture(
         case="normal-base-advance-replay",
         strategy=strategy,
     )
-    probe = Classifier(fixture).run()
+    probe = run_classifier(fixture)
     measured = probe["metrics"][counter]
     if measured <= 0:
         raise AssertionError(f"origin budget counter {counter} was not exercised")
@@ -11670,16 +12276,17 @@ def run_fixture(fixture: Fixture, damage: Damage | None = None):
             fixture.repo.root,
             adapter_input["event_kind"],
             adapter_input["payload"],
+            git_runner=_trusted_git_runner(),
         )
         result["scenario"] = fixture.scenario
         result["expected_result"] = fixture.expected
         result["details"] = fixture.details
         return result
     if "restore_hidden" not in fixture.details:
-        result = Classifier(fixture, damage).run()
+        result = run_classifier(fixture, damage)
         workflow = fixture.details.get("workflow_contract", {})
         if workflow.get("repeat_exact_inputs") and damage is None:
-            repeated = Classifier(fixture).run()
+            repeated = run_classifier(fixture)
             result["workflow_input_evidence"] = {
                 "exact_O_N_repeated": [fixture.O, fixture.N],
                 "raw_results_equal": result == repeated,
@@ -11688,15 +12295,20 @@ def run_fixture(fixture: Fixture, damage: Damage | None = None):
     if damage is not None:
         raise ValueError("recovery fixture does not accept damage mode")
     missing_oid = fixture.details["missing_claim_blob_oid"]
-    reader_metrics = Metrics()
-    reader = ObjectDatabase(fixture.repo.root, reader_metrics)
+    reader_session = RepositorySession(
+        fixture.repo.root,
+        git_runner=_trusted_git_runner(),
+    )
+    reader_metrics = reader_session.metrics
+    reader_session.open()
+    reader = reader_session.create_object_database()
     first_reader_reason = None
     try:
         reader.read(missing_oid)
     except Unreadable as error:
         first_reader_reason = str(error)
     missing_cached = missing_oid in reader.objects
-    first = Classifier(fixture).run()
+    first = run_classifier(fixture)
     hidden = fixture.repo.root / fixture.details["restore_hidden"]
     target = fixture.repo.root / fixture.details["restore_target"]
     if hidden.is_file():
@@ -11710,8 +12322,8 @@ def run_fixture(fixture: Fixture, damage: Damage | None = None):
             reader_metrics.object_cache_hits == cache_hits_before + 1
         )
     finally:
-        reader.close()
-    second = Classifier(fixture).run()
+        reader_session.close()
+    second = run_classifier(fixture)
     second["recovery"] = {
         "first_status": first["evidence_verdict"]["status"],
         "first_reason": first["evidence_verdict"]["reason"],
@@ -14159,188 +14771,390 @@ def control_builder(name: str, root: Path):
     raise ValueError(name)
 
 
-def run_control(name: str, root: Path):
-    if name == "event-adapter-cli-entrypoint":
-        fixtures = {
-            "clean": r19_event_workflow_fixture(
-                root / "clean", transport="push"
+def _event_adapter_control(root: Path) -> dict:
+    """Prove the public event boundary is session-local and result-owning."""
+    fixtures = {
+        "clean": r19_event_workflow_fixture(
+            root / "clean", transport="push"
+        ),
+        "blocking": r19_event_workflow_fixture(
+            root / "blocking", transport="pre-push", attack=True
+        ),
+        "unavailable": r19_event_workflow_fixture(
+            root / "unavailable",
+            transport="pull-request-synchronize",
+            failure="head-mismatch",
+        ),
+    }
+    clean_input = fixtures["clean"].details["event_adapter_input"]
+
+    def process_is_gone(pid):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        except PermissionError:
+            return False
+        return False
+
+    def open_descriptor_count():
+        for directory in (Path("/dev/fd"), Path("/proc/self/fd")):
+            try:
+                return len(tuple(directory.iterdir()))
+            except OSError:
+                continue
+        return None
+
+    class RecordingRunner:
+        def __init__(
+            self,
+            delegate=REAL_POPEN,
+            *,
+            fail_ordinal=None,
+            failure=None,
+        ):
+            self.delegate = delegate
+            self.fail_ordinal = fail_ordinal
+            self.failure = failure
+            self.calls = []
+            self.created = []
+
+        def __call__(self, command, *args, **kwargs):
+            self.calls.append(tuple(str(value) for value in command))
+            if len(self.calls) == self.fail_ordinal:
+                raise self.failure or RuntimeError(
+                    "injected runner ordinal failure"
+                )
+            process = self.delegate(command, *args, **kwargs)
+            self.created.append(process.pid)
+            return process
+
+    class ObserverBaseException(BaseException):
+        pass
+
+    def seam_probe(
+        event_kind: Any,
+        payload: Any,
+        *,
+        budget_limit: Any = None,
+        repository: Path | None = None,
+        runner=None,
+        runner_fail_ordinal=None,
+        runner_failure=None,
+        observer_failure=None,
+        observer_fail_ordinal=1,
+        transaction_stage=None,
+        transaction_failure=None,
+        truthy_exit=False,
+        trace_cancellation_boundary=None,
+        trace_session_boundary=None,
+        trace_spawn_boundary=None,
+    ):
+        before_spawns = []
+        after_spawns = []
+        lifecycle = {
+            "factory": 0,
+            "enter": 0,
+            "exit": 0,
+            "exit_after_reap": None,
+            "exit_exception": None,
+        }
+        private_prefix = (
+            __name__.replace(".", "_") + "_private_reconcile_"
+        )
+        private_before = {
+            key for key in sys.modules if key.startswith(private_prefix)
+        }
+        active_runner = (
+            runner
+            if runner is not None
+            else RecordingRunner(
+                fail_ordinal=runner_fail_ordinal,
+                failure=runner_failure,
+            )
+        )
+
+        def arm_cancellation(target, boundary, stage):
+            source_lines, source_start = inspect.getsourcelines(target)
+            marker = boundary.__name__ + '("' + stage + '")'
+            matches = [
+                source_start + index
+                for index, line in enumerate(source_lines)
+                if marker in line
+            ]
+            if len(matches) != 1:
+                raise AssertionError(
+                    f"{target.__name__} boundary marker is not unique"
+                )
+            target_line = matches[0]
+
+            def cancel_at_boundary(frame, event, _argument):
+                if (
+                    frame.f_code is target.__code__
+                    and event == "line"
+                    and frame.f_lineno == target_line
+                ):
+                    sys.settrace(None)
+                    raise KeyboardInterrupt(
+                        "injected cancellation at " + stage
+                    )
+                return cancel_at_boundary
+
+            frame = sys._getframe()
+            while frame is not None:
+                if frame.f_code is target.__code__:
+                    frame.f_trace = cancel_at_boundary
+                    break
+                frame = frame.f_back
+            sys.settrace(cancel_at_boundary)
+
+        class AccountingObserver:
+            def before_spawn(self, command):
+                before_spawns.append(command)
+
+            def after_spawn(self, command, pid):
+                after_spawns.append((command, pid))
+                if (
+                    observer_failure is not None
+                    and len(after_spawns) == observer_fail_ordinal
+                ):
+                    raise observer_failure
+
+        class Transaction:
+            def __enter__(self):
+                lifecycle["enter"] += 1
+                if transaction_stage == "enter":
+                    raise transaction_failure
+                if trace_cancellation_boundary is not None:
+                    arm_cancellation(
+                        audit_event,
+                        _transaction_boundary,
+                        trace_cancellation_boundary,
+                    )
+                return AccountingObserver()
+
+            def __exit__(self, exc_type, exc, traceback):
+                lifecycle["exit"] += 1
+                lifecycle["exit_exception"] = (
+                    exc_type.__name__ if exc_type is not None else None
+                )
+                lifecycle["exit_after_reap"] = all(
+                    process_is_gone(pid) for _command, pid in after_spawns
+                )
+                if transaction_stage == "exit":
+                    raise transaction_failure
+                return truthy_exit
+
+        def transaction():
+            lifecycle["factory"] += 1
+            if transaction_stage == "factory":
+                raise transaction_failure
+            return Transaction()
+
+        result = None
+        caught = None
+        gc.collect()
+        descriptors_before = open_descriptor_count()
+        try:
+            if trace_session_boundary is not None:
+                arm_cancellation(
+                    RepositorySession.open,
+                    _session_boundary,
+                    trace_session_boundary,
+                )
+            if trace_spawn_boundary is not None:
+                arm_cancellation(
+                    spawn_git_process,
+                    _spawn_boundary,
+                    trace_spawn_boundary,
+                )
+            result = audit_event(
+                repository or fixtures["clean"].repo.root,
+                event_kind,
+                payload,
+                git_runner=active_runner,
+                budget_limit=budget_limit,
+                transaction=transaction,
+            )
+        except BaseException as error:
+            caught = error
+        finally:
+            sys.settrace(None)
+        gc.collect()
+        descriptors_after = open_descriptor_count()
+        private_after = {
+            key for key in sys.modules if key.startswith(private_prefix)
+        }
+        observed_pids = [pid for _command, pid in after_spawns]
+        metrics = result.get("metrics", {}) if result is not None else {}
+        runner_calls = getattr(active_runner, "calls", ())
+        runner_created = getattr(active_runner, "created", ())
+        return {
+            "adapter_status": (
+                result.get("event_adapter", {}).get("status")
+                if result is not None
+                else None
             ),
-            "blocking": r19_event_workflow_fixture(
-                root / "blocking", transport="pre-push", attack=True
+            "after": len(after_spawns),
+            "all_pids_reaped": all(
+                process_is_gone(pid) for pid in observed_pids
             ),
-            "unavailable": r19_event_workflow_fixture(
-                root / "unavailable",
-                transport="pull-request-synchronize",
-                failure="head-mismatch",
+            "all_runner_pids_reaped": all(
+                process_is_gone(pid)
+                for pid in getattr(active_runner, "created", ())
+            ),
+            "attempts": metrics.get("git_process_attempts"),
+            "audit_exit": (
+                result.get("audit_exit") if result is not None else None
+            ),
+            "before": len(before_spawns),
+            "caught": type(caught).__name__ if caught is not None else None,
+            "classification": (
+                result.get("classification") if result is not None else None
+            ),
+            "commands_match": (
+                before_spawns
+                == [command for command, _pid in after_spawns]
+            ),
+            "created": metrics.get("git_processes"),
+            "fd_delta": (
+                descriptors_after - descriptors_before
+                if descriptors_before is not None
+                and descriptors_after is not None
+                else None
+            ),
+            "lifecycle": lifecycle,
+            "private_modules_leaked": sorted(
+                private_after - private_before
+            ),
+            "reason": (
+                result.get("evidence_verdict", {}).get("reason")
+                if result is not None
+                else None
+            ),
+            "runner_calls": len(runner_calls),
+            "runner_created": len(runner_created),
+            "typed_origin_strategy": (
+                result.get("input_contract", {}).get("origin_strategy")
+                if result is not None
+                else None
             ),
         }
-        observations = {}
-        for label, fixture in fixtures.items():
-            adapter_input = fixture.details["event_adapter_input"]
-            payload_path = root / f"{label}-event.json"
-            payload_path.write_bytes(
-                json.dumps(
-                    adapter_input["payload"],
+
+    observations = {}
+    for label, fixture in fixtures.items():
+        adapter_input = fixture.details["event_adapter_input"]
+        payload_path = root / f"{label}-event.json"
+        payload_path.write_bytes(
+            json.dumps(
+                adapter_input["payload"],
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+            + b"\n"
+        )
+        completed = REAL_RUN(
+            [
+                sys.executable,
+                str(HERE),
+                "--repo",
+                str(fixture.repo.root),
+                "--event-kind",
+                adapter_input["event_kind"],
+                "--event-payload",
+                str(payload_path),
+            ],
+            check=False,
+            env=stable_git_environment(),
+            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+        )
+        try:
+            cli_result = json.loads(completed.stdout.decode("utf-8"))
+        except (UnicodeError, json.JSONDecodeError):
+            cli_result = {}
+        imported_result = audit_event(
+            fixture.repo.root,
+            adapter_input["event_kind"],
+            adapter_input["payload"],
+            git_runner=_trusted_git_runner(),
+        )
+        observations[label] = {
+            "adapter_status": cli_result.get("event_adapter", {}).get(
+                "status"
+            ),
+            "classification": cli_result.get("classification"),
+            "exit": completed.returncode,
+            "stdout_canonical": (
+                bool(cli_result)
+                and completed.stdout
+                == json.dumps(
+                    cli_result,
                     ensure_ascii=False,
                     separators=(",", ":"),
                     sort_keys=True,
                 ).encode("utf-8")
                 + b"\n"
-            )
-            completed = REAL_RUN(
-                [
-                    sys.executable,
-                    str(HERE),
-                    "--repo",
-                    str(fixture.repo.root),
-                    "--event-kind",
-                    adapter_input["event_kind"],
-                    "--event-payload",
-                    str(payload_path),
-                ],
-                check=False,
-                env=stable_git_environment(),
-                stderr=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-            )
-            try:
-                result = json.loads(completed.stdout.decode("utf-8"))
-            except (UnicodeError, json.JSONDecodeError):
-                result = {}
-            observations[label] = {
-                "adapter_status": result.get("event_adapter", {}).get(
-                    "status"
-                ),
-                "classification": result.get("classification"),
-                "exit": completed.returncode,
-                "reason": result.get("evidence_verdict", {}).get("reason"),
-                "stdout_canonical": (
-                    bool(result)
-                    and completed.stdout
-                    == json.dumps(
-                        result,
-                        ensure_ascii=False,
-                        separators=(",", ":"),
-                        sort_keys=True,
-                    ).encode("utf-8")
-                    + b"\n"
-                ),
-                "typed_origin_strategy": result.get(
-                    "input_contract", {}
-                ).get("origin_strategy"),
-            }
+            ),
+            "typed_origin_strategy": cli_result.get(
+                "input_contract", {}
+            ).get("origin_strategy"),
+            "typed_results_equal": cli_result == imported_result,
+        }
 
-        def seam_probe(
-            event_kind: Any,
-            payload: Any,
-            *,
-            budget_limit: Any = None,
-            repository: Path | None = None,
-            fail_after_spawn: bool = False,
-            ambient_delegating_wrapper: bool = False,
-            factory_error_type=None,
-        ):
-            transaction_entries = 0
-            before_spawns = []
-            after_spawns = []
-            ambient_wrapper_calls = 0
+    typed_cli_inputs = {}
+    for label, event_kind, payload in (
+        ("non-mapping-payload", "local", []),
+        ("unsupported-event-kind", "not-a-transport", {}),
+    ):
+        payload_path = root / f"{label}.json"
+        payload_path.write_bytes(
+            json.dumps(payload, separators=(",", ":")).encode("utf-8")
+            + b"\n"
+        )
+        completed = REAL_RUN(
+            [
+                sys.executable,
+                str(HERE),
+                "--repo",
+                str(fixtures["clean"].repo.root),
+                "--event-kind",
+                event_kind,
+                "--event-payload",
+                str(payload_path),
+            ],
+            check=False,
+            env=stable_git_environment(),
+            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+        )
+        result = json.loads(completed.stdout.decode("utf-8"))
+        typed_cli_inputs[label] = {
+            "adapter_status": result["event_adapter"]["status"],
+            "audit_exit": completed.returncode,
+            "classification": result["classification"],
+            "stdout_canonical": completed.stdout == (
+                json.dumps(
+                    result,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ).encode("utf-8")
+                + b"\n"
+            ),
+        }
 
-            class ObserverBaseException(BaseException):
-                pass
-
-            class AccountingObserver:
-                def before_spawn(self, command):
-                    before_spawns.append(command)
-
-                def after_spawn(self, command, pid):
-                    after_spawns.append((command, pid))
-                    if fail_after_spawn:
-                        raise ObserverBaseException(
-                            "injected after-spawn BaseException"
-                        )
-
-            @contextlib.contextmanager
-            def transaction():
-                nonlocal transaction_entries
-                transaction_entries += 1
-                yield AccountingObserver()
-
-            prior_popen = subprocess.Popen
-            prior_factory = REAL_POPEN
-
-            def delegating_popen(command, *args, **kwargs):
-                nonlocal ambient_wrapper_calls
-                ambient_wrapper_calls += 1
-                return spawn_git_process(
-                    command, *args, metrics=Metrics(), **kwargs
-                )
-
-            if ambient_delegating_wrapper:
-                subprocess.Popen = delegating_popen
-            if factory_error_type is not None:
-                def failing_factory(*_args, **_kwargs):
-                    raise factory_error_type(
-                        "injected Git process factory throwable"
-                    )
-
-                globals()["REAL_POPEN"] = failing_factory
-            try:
-                result = audit_event(
-                    repository or fixtures["clean"].repo.root,
-                    event_kind,
-                    payload,
-                    budget_limit=budget_limit,
-                    transaction=transaction,
-                )
-            finally:
-                subprocess.Popen = prior_popen
-                globals()["REAL_POPEN"] = prior_factory
-            observed_pids = [pid for _command, pid in after_spawns]
-
-            def process_is_gone(pid):
-                try:
-                    os.kill(pid, 0)
-                except ProcessLookupError:
-                    return True
-                except PermissionError:
-                    return False
-                return False
-
-            return {
-                "audit_exit": result["audit_exit"],
-                "adapter_status": result["event_adapter"]["status"],
-                "transaction_entries": transaction_entries,
-                "git_subprocesses": len(after_spawns),
-                "before_spawns": len(before_spawns),
-                "after_spawns": len(after_spawns),
-                "commands_match": [
-                    command for command, _pid in after_spawns
-                ] == before_spawns,
-                "all_pids_concrete": all(
-                    type(pid) is int and pid > 0
-                    for _command, pid in after_spawns
-                ),
-                "all_pids_unique": len(set(observed_pids))
-                == len(observed_pids),
-                "all_observed_pids_reaped": (
-                    all(process_is_gone(pid) for pid in observed_pids)
-                    if fail_after_spawn
-                    else None
-                ),
-                "ambient_wrapper_calls": ambient_wrapper_calls,
-                "result_git_process_attempts": result["metrics"][
-                    "git_process_attempts"
-                ],
-                "result_git_processes": result["metrics"]["git_processes"],
-                "reason": result["evidence_verdict"]["reason"],
-                "typed_origin_strategy": result["input_contract"][
-                    "origin_strategy"
-                ],
-            }
-
-        clean_input = fixtures["clean"].details["event_adapter_input"]
-        same_oid = fixtures["clean"].O
-        same_endpoint_payloads = {
+    execution_seam = {
+        "valid": seam_probe(
+            clean_input["event_kind"], clean_input["payload"]
+        ),
+        "invalid": seam_probe("local", {"new": "1" * 40}),
+    }
+    same_oid = fixtures["clean"].O
+    execution_seam["identical_endpoint_rejections"] = {
+        transport: seam_probe(transport, payload)
+        for transport, payload in {
             "local": {"old": same_oid, "new": same_oid},
             "pre-push": {"old": same_oid, "new": same_oid},
             "push": {"before": same_oid, "after": same_oid},
@@ -14349,762 +15163,959 @@ def run_control(name: str, root: Path):
                 "after": same_oid,
                 "pull_request": {"head": {"sha": same_oid}},
             },
-        }
-        identical_endpoint_rejections = {
-            transport: seam_probe(transport, payload)
-            for transport, payload in same_endpoint_payloads.items()
-        }
-        invalid_budget_rejections = {
-            label: seam_probe(
-                clean_input["event_kind"],
-                clean_input["payload"],
-                budget_limit=value,
-            )
-            for label, value in (
-                ("zero", 0),
-                ("negative", -1),
-                ("bool-false", False),
-                ("bool-true", True),
-                ("float", 1.0),
-                ("string", "1"),
-            )
-        }
-        invalid_runtime_inputs = {
-            label: {
-                "observation": seam_probe(event_kind, payload),
-                "reason": reason,
-            }
-            for label, event_kind, payload, reason in (
-                (
-                    "payload-none", "local", None,
-                    "event payload must be a mapping",
-                ),
-                (
-                    "payload-list", "local", [],
-                    "event payload must be a mapping",
-                ),
-                (
-                    "payload-int", "local", 7,
-                    "event payload must be a mapping",
-                ),
-                (
-                    "event-kind-list", ["local"], clean_input["payload"],
-                    "event kind must be a string",
-                ),
-                (
-                    "event-kind-dict", {"kind": "local"},
-                    clean_input["payload"], "event kind must be a string",
-                ),
-            )
-        }
-        execution_seam = {
-            "valid": seam_probe(
-                clean_input["event_kind"], clean_input["payload"]
-            ),
-            "invalid": seam_probe("local", {"new": "1" * 40}),
-            "identical_endpoint_rejections": identical_endpoint_rejections,
-            "invalid_budget_rejections": invalid_budget_rejections,
-            "invalid_runtime_inputs": invalid_runtime_inputs,
-            "spawn_factory_failure": seam_probe(
-                clean_input["event_kind"],
-                clean_input["payload"],
-                repository=Path("missing-production-contract-runtime-root"),
-            ),
-            "after_spawn_base_exception": seam_probe(
-                clean_input["event_kind"],
-                clean_input["payload"],
-                fail_after_spawn=True,
-            ),
-            "ambient_delegating_wrapper": seam_probe(
-                clean_input["event_kind"],
-                clean_input["payload"],
-                ambient_delegating_wrapper=True,
-            ),
-        }
-
-        class FactoryBaseException(BaseException):
-            pass
-
-        execution_seam["factory_throwables"] = {
-            name: seam_probe(
-                clean_input["event_kind"],
-                clean_input["payload"],
-                factory_error_type=error_type,
-            )
-            for name, error_type in (
-                ("runtime-error", RuntimeError),
-                ("subprocess-error", subprocess.SubprocessError),
-                ("direct-base-exception", FactoryBaseException),
-            )
-        }
-
-        different_fixture = r19_event_workflow_fixture(
-            root / "threaded-different-repository", transport="push"
+        }.items()
+    }
+    execution_seam["invalid_budget_rejections"] = {
+        label: seam_probe(
+            clean_input["event_kind"],
+            clean_input["payload"],
+            budget_limit=value,
         )
+        for label, value in (
+            ("zero", 0),
+            ("negative", -1),
+            ("bool-false", False),
+            ("bool-true", True),
+            ("float", 1.0),
+            ("string", "1"),
+        )
+    }
+    execution_seam["invalid_runtime_inputs"] = {
+        label: seam_probe(event_kind, payload)
+        for label, event_kind, payload in (
+            ("payload-none", "local", None),
+            ("payload-list", "local", []),
+            ("payload-int", "local", 7),
+            ("event-kind-list", ["local"], clean_input["payload"]),
+            (
+                "event-kind-dict",
+                {"kind": "local"},
+                clean_input["payload"],
+            ),
+        )
+    }
 
-        def threaded_serialization_probe(different_repositories: bool):
-            barrier = threading.Barrier(2)
-            loser_finished = threading.Event()
-            results = [None, None]
-            failures = [None, None]
-            observations = [([], []), ([], [])]
-            ambient_calls = 0
-            prior_popen = subprocess.Popen
+    baseline_attempts = execution_seam["valid"]["attempts"] or 0
+    execution_seam["runner_ordinal_failures"] = {
+        str(ordinal): seam_probe(
+            clean_input["event_kind"],
+            clean_input["payload"],
+            runner_fail_ordinal=ordinal,
+            runner_failure=RuntimeError(
+                f"injected runner failure {ordinal}"
+            ),
+        )
+        for ordinal in range(1, baseline_attempts + 1)
+    }
 
-            def ambient_popen(*args, **kwargs):
-                nonlocal ambient_calls
-                ambient_calls += 1
-                return prior_popen(*args, **kwargs)
+    class DirectBaseException(BaseException):
+        pass
 
-            class ThreadObserver:
-                def __init__(self, index):
-                    self.index = index
+    execution_seam["runner_throwables"] = {
+        label: seam_probe(
+            clean_input["event_kind"],
+            clean_input["payload"],
+            runner_fail_ordinal=1,
+            runner_failure=error,
+        )
+        for label, error in (
+            ("runtime", RuntimeError("runner runtime")),
+            ("subprocess", subprocess.SubprocessError("runner subprocess")),
+            ("direct-base", DirectBaseException("runner direct base")),
+        )
+    }
+    execution_seam["runner_cancellation"] = seam_probe(
+        clean_input["event_kind"],
+        clean_input["payload"],
+        runner_fail_ordinal=1,
+        runner_failure=KeyboardInterrupt("runner cancellation"),
+    )
+    execution_seam["observer_throwables"] = {
+        "runtime": seam_probe(
+            clean_input["event_kind"],
+            clean_input["payload"],
+            observer_failure=RuntimeError("observer runtime"),
+        ),
+        "direct-base": seam_probe(
+            clean_input["event_kind"],
+            clean_input["payload"],
+            observer_failure=ObserverBaseException("observer base"),
+        ),
+        "keyboard": seam_probe(
+            clean_input["event_kind"],
+            clean_input["payload"],
+            observer_failure=KeyboardInterrupt("observer cancellation"),
+        ),
+    }
 
-                def before_spawn(self, command):
-                    observations[self.index][0].append(command)
-
-                def after_spawn(self, command, pid):
-                    observations[self.index][1].append((command, pid))
-
-            def worker(index, fixture):
-                @contextlib.contextmanager
-                def transaction():
-                    loser_finished.wait(timeout=10)
-                    yield ThreadObserver(index)
-
-                try:
-                    adapter = fixture.details["event_adapter_input"]
-                    barrier.wait(timeout=10)
-                    results[index] = audit_event(
-                        fixture.repo.root,
-                        adapter["event_kind"],
-                        adapter["payload"],
-                        transaction=transaction,
-                    )
-                    if results[index]["event_adapter"]["status"] == "audit-busy":
-                        loser_finished.set()
-                except BaseException as error:
-                    failures[index] = f"{type(error).__name__}:{error}"
-                    loser_finished.set()
-
-            fixtures_for_threads = (
-                (fixtures["clean"], different_fixture)
-                if different_repositories
-                else (fixtures["clean"], fixtures["clean"])
+    transaction_throwables = {}
+    for stage in ("factory", "enter", "exit"):
+        for label, error in (
+            ("runtime", RuntimeError(f"{stage} runtime")),
+            ("direct-base", DirectBaseException(f"{stage} base")),
+        ):
+            transaction_throwables[f"{stage}-{label}"] = seam_probe(
+                clean_input["event_kind"],
+                clean_input["payload"],
+                transaction_stage=stage,
+                transaction_failure=error,
             )
-            subprocess.Popen = ambient_popen
-            try:
-                threads = [
-                    threading.Thread(
-                        target=worker,
-                        args=(index, fixture),
-                        name=f"production-contract-audit-{index}",
-                    )
-                    for index, fixture in enumerate(fixtures_for_threads)
-                ]
-                for thread in threads:
-                    thread.start()
-                for thread in threads:
-                    thread.join(timeout=30)
-                threads_completed = all(not thread.is_alive() for thread in threads)
-                ambient_restored_inside = subprocess.Popen is ambient_popen
-            finally:
-                subprocess.Popen = prior_popen
-            calls = []
-            for index, result in enumerate(results):
-                before, after = observations[index]
-                calls.append(
-                    {
-                        "adapter_status": (
-                            result["event_adapter"]["status"]
-                            if result is not None else None
-                        ),
-                        "after_spawns": len(after),
-                        "attempts": (
-                            result["metrics"]["git_process_attempts"]
-                            if result is not None else None
-                        ),
-                        "audit_exit": (
-                            result["audit_exit"] if result is not None else None
-                        ),
-                        "before_spawns": len(before),
-                        "classification": (
-                            result["classification"]
-                            if result is not None else None
-                        ),
-                        "processes": (
-                            result["metrics"]["git_processes"]
-                            if result is not None else None
-                        ),
-                        "unique_pids": len({pid for _command, pid in after})
-                        == len(after),
-                    }
-                )
-            return {
-                "ambient_factory_restored_exactly": (
-                    ambient_restored_inside
-                    and subprocess.Popen is prior_popen
-                ),
-                "ambient_wrapper_calls": ambient_calls,
-                "calls": sorted(
-                    calls, key=lambda item: str(item["adapter_status"])
-                ),
-                "different_repositories": different_repositories,
-                "failures": failures,
-                "threads_completed": threads_completed,
-            }
+    execution_seam["transaction_throwables"] = transaction_throwables
+    execution_seam["transaction_cancellations"] = {
+        stage: seam_probe(
+            clean_input["event_kind"],
+            clean_input["payload"],
+            transaction_stage=stage,
+            transaction_failure=KeyboardInterrupt(
+                f"{stage} cancellation"
+            ),
+        )
+        for stage in ("factory", "enter", "exit")
+    }
+    execution_seam["trace_cancellation_boundaries"] = {
+        stage: seam_probe(
+            clean_input["event_kind"],
+            clean_input["payload"],
+            trace_cancellation_boundary=stage,
+        )
+        for stage in ("after-enter", "after-session-close")
+    }
+    execution_seam["session_setup_cancellation_boundaries"] = {
+        stage: seam_probe(
+            clean_input["event_kind"],
+            clean_input["payload"],
+            trace_session_boundary=stage,
+        )
+        for stage in ("after-reconciler-load", "after-context-set")
+    }
+    execution_seam["spawn_construction_cancellation_boundaries"] = {
+        stage: seam_probe(
+            clean_input["event_kind"],
+            clean_input["payload"],
+            trace_spawn_boundary=stage,
+        )
+        for stage in (
+            "after-runner-publication",
+            "after-runner-return",
+            "after-pipe-attachment",
+        )
+    }
+    execution_seam["truthy_exit_ignored"] = seam_probe(
+        clean_input["event_kind"],
+        clean_input["payload"],
+        truthy_exit=True,
+    )
+    execution_seam["noncallable_runner"] = seam_probe(
+        clean_input["event_kind"],
+        clean_input["payload"],
+        runner=object(),
+    )
 
-        execution_seam["threaded_serialization"] = {
-            "different-repository": threaded_serialization_probe(True),
-            "same-repository": threaded_serialization_probe(False),
-        }
+    ambient_module = subprocess
+    ambient_popen_identity = ambient_module.Popen
 
-        nested_transaction_entries = 0
-        nested_before = []
-        nested_after = []
-        nested_result = None
+    class PoisonAmbientSubprocess:
+        PIPE = ambient_module.PIPE
+        DEVNULL = ambient_module.DEVNULL
+        TimeoutExpired = ambient_module.TimeoutExpired
+        CalledProcessError = ambient_module.CalledProcessError
+        CompletedProcess = ambient_module.CompletedProcess
+        SubprocessError = ambient_module.SubprocessError
 
-        class NestedObserver:
+        @staticmethod
+        def Popen(*_args, **_kwargs):
+            raise AssertionError("ambient Popen reached")
+
+        @staticmethod
+        def run(*_args, **_kwargs):
+            raise AssertionError("ambient run reached")
+
+    poison_runner = RecordingRunner()
+    globals()["subprocess"] = PoisonAmbientSubprocess
+    try:
+        poison_probe = seam_probe(
+            clean_input["event_kind"],
+            clean_input["payload"],
+            runner=poison_runner,
+        )
+    finally:
+        globals()["subprocess"] = ambient_module
+    execution_seam["hostile_ambient_subprocess"] = {
+        **poison_probe,
+        "popen_identity_unchanged": (
+            ambient_module.Popen is ambient_popen_identity
+            and subprocess.Popen is ambient_popen_identity
+        ),
+    }
+
+    def concurrency_probe(modules, selected_fixtures, shared_runner):
+        barrier = threading.Barrier(2)
+        results = [None, None]
+        failures = [None, None]
+        observations_by_index = [([], []), ([], [])]
+
+        class ConcurrentObserver:
+            def __init__(self, index):
+                self.index = index
+
             def before_spawn(self, command):
-                nested_before.append(command)
+                observations_by_index[self.index][0].append(command)
 
             def after_spawn(self, command, pid):
-                nested_after.append((command, pid))
+                observations_by_index[self.index][1].append(
+                    (command, pid)
+                )
 
-        @contextlib.contextmanager
-        def forbidden_nested_transaction():
-            nonlocal nested_transaction_entries
-            nested_transaction_entries += 1
-            yield None
+        class ConcurrentTransaction:
+            def __init__(self, index):
+                self.index = index
 
-        @contextlib.contextmanager
-        def outer_nested_transaction():
-            nonlocal nested_result
-            nested_result = audit_event(
-                fixtures["clean"].repo.root,
-                clean_input["event_kind"],
-                clean_input["payload"],
-                transaction=forbidden_nested_transaction,
+            def __enter__(self):
+                barrier.wait(timeout=20)
+                return ConcurrentObserver(self.index)
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+        def worker(index):
+            module = modules[index]
+            fixture = selected_fixtures[index]
+            adapter = fixture.details["event_adapter_input"]
+            runner = shared_runner or RecordingRunner(
+                delegate=module.REAL_POPEN
             )
-            yield NestedObserver()
+            try:
+                results[index] = module.audit_event(
+                    fixture.repo.root,
+                    adapter["event_kind"],
+                    adapter["payload"],
+                    git_runner=runner,
+                    transaction=lambda: ConcurrentTransaction(index),
+                )
+            except BaseException as error:
+                failures[index] = f"{type(error).__name__}:{error}"
 
-        nested_outer = audit_event(
+        threads = [
+            threading.Thread(
+                target=worker,
+                args=(index,),
+                name=f"production-contract-concurrent-{index}",
+            )
+            for index in range(2)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=60)
+        calls = []
+        for index, result in enumerate(results):
+            before, after = observations_by_index[index]
+            calls.append(
+                {
+                    "adapter_status": (
+                        result["event_adapter"]["status"]
+                        if result is not None
+                        else None
+                    ),
+                    "after": len(after),
+                    "attempts": (
+                        result["metrics"]["git_process_attempts"]
+                        if result is not None
+                        else None
+                    ),
+                    "audit_exit": (
+                        result["audit_exit"] if result is not None else None
+                    ),
+                    "before": len(before),
+                    "created": (
+                        result["metrics"]["git_processes"]
+                        if result is not None
+                        else None
+                    ),
+                    "pids_unique": (
+                        len({pid for _command, pid in after}) == len(after)
+                    ),
+                }
+            )
+        return {
+            "ambient_popen_identity_unchanged": (
+                subprocess.Popen is ambient_popen_identity
+            ),
+            "calls": calls,
+            "failures": failures,
+            "shared_runner_calls": (
+                len(shared_runner.calls)
+                if shared_runner is not None
+                else None
+            ),
+            "threads_completed": all(
+                not thread.is_alive() for thread in threads
+            ),
+        }
+
+    different_fixture = r19_event_workflow_fixture(
+        root / "concurrent-different", transport="push"
+    )
+    this_module = sys.modules[__name__]
+    execution_seam["same_module_concurrency"] = {
+        "same-root": concurrency_probe(
+            (this_module, this_module),
+            (fixtures["clean"], fixtures["clean"]),
+            None,
+        ),
+        "different-root": concurrency_probe(
+            (this_module, this_module),
+            (fixtures["clean"], different_fixture),
+            RecordingRunner(),
+        ),
+    }
+
+    def load_prototype_copy(label):
+        module_name = (
+            f"production_contract_copy_{label}_{uuid.uuid4().hex}"
+        )
+        spec = importlib.util.spec_from_file_location(module_name, HERE)
+        if spec is None or spec.loader is None:
+            raise RuntimeError("could not create duplicate prototype spec")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        try:
+            spec.loader.exec_module(module)
+        except BaseException:
+            if sys.modules.get(module_name) is module:
+                sys.modules.pop(module_name, None)
+            raise
+        return module_name, module
+
+    copy_records = [load_prototype_copy(str(index)) for index in range(2)]
+    shared_runner = RecordingRunner()
+    try:
+        duplicate_probe = concurrency_probe(
+            tuple(module for _name, module in copy_records),
+            (fixtures["clean"], different_fixture),
+            shared_runner,
+        )
+        copy_private_prefixes = [
+            module.__name__.replace(".", "_") + "_private_reconcile_"
+            for _name, module in copy_records
+        ]
+        duplicate_probe["private_modules_leaked"] = sorted(
+            key
+            for key in sys.modules
+            if any(
+                key.startswith(prefix) for prefix in copy_private_prefixes
+            )
+        )
+    finally:
+        for module_name, module in copy_records:
+            if sys.modules.get(module_name) is module:
+                sys.modules.pop(module_name, None)
+    execution_seam["duplicate_module_concurrency"] = duplicate_probe
+
+    cache_sessions = [
+        RepositorySession(
+            fixture.repo.root,
+            git_runner=_trusted_git_runner(),
+        )
+        for fixture in (fixtures["clean"], different_fixture)
+    ]
+    cache_module_names = []
+    try:
+        for session in cache_sessions:
+            session.open()
+            cache_module_names.append(session.reconcile.__name__)
+        cache_sessions[0].reconcile._GIT_BLOB_CACHE["sentinel"] = b"one"
+        cache_sessions[0].carry_proof_cache[("sentinel", "one")] = {
+            "owner": "one"
+        }
+        cache_isolation = {
+            "carry_cache_distinct": (
+                cache_sessions[0].carry_proof_cache
+                is not cache_sessions[1].carry_proof_cache
+            ),
+            "carry_cache_unshared": (
+                ("sentinel", "one")
+                not in cache_sessions[1].carry_proof_cache
+            ),
+            "reconcile_cache_distinct": (
+                cache_sessions[0].reconcile._GIT_BLOB_CACHE
+                is not cache_sessions[1].reconcile._GIT_BLOB_CACHE
+            ),
+            "reconcile_cache_unshared": (
+                "sentinel"
+                not in cache_sessions[1].reconcile._GIT_BLOB_CACHE
+            ),
+            "reconcile_modules_distinct": (
+                cache_sessions[0].reconcile
+                is not cache_sessions[1].reconcile
+            ),
+            "subprocess_facades_distinct": (
+                cache_sessions[0].reconcile.subprocess
+                is not cache_sessions[1].reconcile.subprocess
+            ),
+        }
+    finally:
+        for session in reversed(cache_sessions):
+            session.close()
+    cache_isolation["private_modules_removed"] = all(
+        module_name not in sys.modules for module_name in cache_module_names
+    )
+    execution_seam["cache_isolation"] = cache_isolation
+
+    ambient_reconcilers = [load_reconciler(), load_reconciler()]
+    poisoned_dates = (
+        datetime.date(1999, 12, 31),
+        datetime.date(2099, 1, 1),
+    )
+    for reconcile, poisoned_date in zip(
+        ambient_reconcilers, poisoned_dates, strict=True
+    ):
+        reconcile.TODAY = poisoned_date
+
+    def render_retry_in_private_session(index):
+        session = RepositorySession(
+            fixtures["clean"].repo.root,
+            git_runner=_trusted_git_runner(),
+        )
+        module_name = None
+        session.open()
+        try:
+            module_name = session.reconcile.__name__
+            finding = session.reconcile.Finding(
+                "queue-name",
+                Path("message-queue/needs-agent/requests/bad.md"),
+                "bad name",
+                "rename it",
+            )
+            path = (
+                "message-queue/needs-agent/retries/blocking-"
+                + session.reconcile.finding_key(finding)
+                + ".md"
+            )
+            text = session.reconcile.retry_text(finding)
+            payload = text.encode("utf-8")
+            identity = list(
+                session.reconcile.queue_action_identity(path, text)
+            )
+            filed = session.reconcile.text_fields(text)["Filed"]
+            return {
+                "ambient_date": poisoned_dates[index].isoformat(),
+                "ambient_date_unchanged": (
+                    ambient_reconcilers[index].TODAY
+                    == poisoned_dates[index]
+                ),
+                "bytes_sha256": hashlib.sha256(payload).hexdigest(),
+                "filed": filed,
+                "fixed_session_date": (
+                    session.reconcile.TODAY.isoformat()
+                ),
+                "git_blob_oid": hashlib.sha1(
+                    b"blob "
+                    + str(len(payload)).encode("ascii")
+                    + b"\0"
+                    + payload
+                ).hexdigest(),
+                "identity": identity,
+                "path": path,
+                "payload": text,
+                "private_module": module_name,
+            }
+        finally:
+            session.close()
+
+    try:
+        retry_replays = [
+            render_retry_in_private_session(index) for index in range(2)
+        ]
+    finally:
+        for reconcile in ambient_reconcilers:
+            if sys.modules.get(reconcile.__name__) is reconcile:
+                sys.modules.pop(reconcile.__name__, None)
+    retry_module_names = [
+        replay.pop("private_module") for replay in retry_replays
+    ]
+    comparable_retry_replays = [
+        {
+            key: value
+            for key, value in replay.items()
+            if key != "ambient_date"
+        }
+        for replay in retry_replays
+    ]
+    execution_seam["fixture_date_replay"] = {
+        "fixed_date": FIXTURE_DATE.isoformat(),
+        "opposite_ambient_dates": [
+            value.isoformat() for value in poisoned_dates
+        ],
+        "private_modules_removed": all(
+            module_name not in sys.modules
+            for module_name in retry_module_names
+        ),
+        "private_modules_unique": len(set(retry_module_names)) == 2,
+        "replays": retry_replays,
+        "stable_bytes_oid_identity_and_filed_date": (
+            comparable_retry_replays[0] == comparable_retry_replays[1]
+            and retry_replays[0]["filed"].startswith(
+                FIXTURE_DATE.isoformat()
+            )
+        ),
+    }
+
+    nested_result = None
+
+    def nested_factory():
+        nonlocal nested_result
+        nested_result = audit_event(
             fixtures["clean"].repo.root,
             clean_input["event_kind"],
             clean_input["payload"],
-            transaction=outer_nested_transaction,
+            git_runner=_trusted_git_runner(),
         )
-        execution_seam["nested_reentry"] = {
-            "nested_actual": nested_result["metrics"]["git_processes"],
-            "nested_attempts": nested_result["metrics"][
-                "git_process_attempts"
-            ],
-            "nested_status": nested_result["event_adapter"]["status"],
-            "nested_transaction_entries": nested_transaction_entries,
-            "outer_actual": nested_outer["metrics"]["git_processes"],
-            "outer_after": len(nested_after),
-            "outer_attempts": nested_outer["metrics"][
-                "git_process_attempts"
-            ],
-            "outer_before": len(nested_before),
-            "outer_exit": nested_outer["audit_exit"],
-        }
+        return contextlib.nullcontext()
 
-        unrelated_metrics = Metrics()
-        unrelated_before = []
-        unrelated_after = []
-        unrelated_ambient_calls = 0
-        unrelated_failure = None
-        prior_popen = subprocess.Popen
+    nested_outer = audit_event(
+        fixtures["clean"].repo.root,
+        clean_input["event_kind"],
+        clean_input["payload"],
+        git_runner=_trusted_git_runner(),
+        transaction=nested_factory,
+    )
+    execution_seam["nested_reentry"] = {
+        "nested_actual": nested_result["metrics"]["git_processes"],
+        "nested_attempts": nested_result["metrics"]["git_process_attempts"],
+        "nested_status": nested_result["event_adapter"]["status"],
+        "outer_actual": nested_outer["metrics"]["git_processes"],
+        "outer_attempts": nested_outer["metrics"]["git_process_attempts"],
+        "outer_status": nested_outer["event_adapter"]["status"],
+    }
 
-        class UnrelatedObserver:
-            def before_spawn(self, command):
-                unrelated_before.append(command)
-
-            def after_spawn(self, command, pid):
-                unrelated_after.append((command, pid))
-
-        def unrelated_ambient(command, *args, **kwargs):
-            nonlocal unrelated_ambient_calls
-            unrelated_ambient_calls += 1
-            return prior_popen(command, *args, **kwargs)
-
-        def unrelated_worker():
-            nonlocal unrelated_failure
-            try:
-                completed = subprocess.Popen(
-                    ["git", "--version"],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                )
-                completed.communicate(timeout=5)
-            except BaseException as error:
-                unrelated_failure = f"{type(error).__name__}:{error}"
-
-        subprocess.Popen = unrelated_ambient
-        try:
-            with observe_git_spawns(
-                UnrelatedObserver()
-            ), count_production_git(unrelated_metrics):
-                unrelated_thread = threading.Thread(
-                    target=unrelated_worker,
-                    name="production-contract-unrelated-popen",
-                )
-                unrelated_thread.start()
-                owned_child = subprocess.Popen(
-                    ["git", "--version"],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                )
-                owned_child.communicate(timeout=5)
-                unrelated_thread.join(timeout=10)
-            ambient_restored_inside = subprocess.Popen is unrelated_ambient
-        finally:
-            subprocess.Popen = prior_popen
-        execution_seam["unrelated_thread_isolation"] = {
-            "ambient_factory_restored_exactly": (
-                ambient_restored_inside
-                and subprocess.Popen is prior_popen
-            ),
-            "ambient_wrapper_calls": unrelated_ambient_calls,
-            "observer_after": len(unrelated_after),
-            "observer_before": len(unrelated_before),
-            "owned_actual": unrelated_metrics.git_processes,
-            "owned_attempts": unrelated_metrics.git_process_attempts,
-            "unrelated_failure": unrelated_failure,
-            "unrelated_thread_completed": not unrelated_thread.is_alive(),
-        }
-
-        def cancellation_probe(error_type, inject_cleanup_report=False):
-            transaction_entries = 0
-            before_spawns = []
-            after_spawns = []
-
-            class CancellationObserver:
-                def before_spawn(self, command):
-                    before_spawns.append(command)
-
-                def after_spawn(self, command, pid):
-                    after_spawns.append((command, pid))
-                    raise error_type("injected after-spawn cancellation")
-
-            @contextlib.contextmanager
-            def transaction():
-                nonlocal transaction_entries
-                transaction_entries += 1
-                yield CancellationObserver()
-
-            original_cleanup = cleanup_unclaimed_process
-
-            def cleanup_then_report(process, owned_pipes):
-                original_cleanup(process, owned_pipes)
-                raise Unreadable("injected cleanup reporting failure")
-
-            if inject_cleanup_report:
-                globals()["cleanup_unclaimed_process"] = cleanup_then_report
-            caught = None
-            try:
-                audit_event(
-                    fixtures["clean"].repo.root,
-                    clean_input["event_kind"],
-                    clean_input["payload"],
-                    transaction=transaction,
-                )
-            except BaseException as error:
-                caught = error
-            finally:
-                globals()["cleanup_unclaimed_process"] = original_cleanup
-            observed_pids = [pid for _command, pid in after_spawns]
-
-            def process_is_gone(pid):
-                try:
-                    os.kill(pid, 0)
-                except ProcessLookupError:
-                    return True
-                except PermissionError:
-                    return False
-                return False
-
-            return {
-                "after_spawns": len(after_spawns),
-                "all_observed_pids_reaped": all(
-                    process_is_gone(pid) for pid in observed_pids
-                ),
-                "before_spawns": len(before_spawns),
-                "cleanup_failure_reported": bool(
-                    inject_cleanup_report
-                    and caught is not None
-                    and any(
-                        "cleanup reporting failure" in note
-                        for note in getattr(caught, "__notes__", ())
-                    )
-                ),
-                "transaction_entries": transaction_entries,
-                "throwable": type(caught).__name__ if caught else None,
-            }
-
-        execution_seam["after_spawn_cancellations"] = {
-            "keyboard": cancellation_probe(KeyboardInterrupt),
-            "system-exit-with-cleanup-report": cancellation_probe(
-                SystemExit, inject_cleanup_report=True
-            ),
-        }
-
-        def piped_child_after_spawn_probe(error_type):
-            before_spawns = []
-            after_spawns = []
-            pipe_allocations = []
-            caught = None
-            result = None
-
-            class PipedChildObserver:
-                def before_spawn(self, command):
-                    before_spawns.append(command)
-
-                def after_spawn(self, command, pid):
-                    after_spawns.append((command, pid))
-                    if len(after_spawns) == 2:
-                        raise error_type(
-                            "injected piped-child after-spawn throwable"
-                        )
-
-            @contextlib.contextmanager
-            def transaction():
-                yield PipedChildObserver()
-
-            original_prepare = prepare_explicit_parent_pipes
-
-            def recording_prepare(labels):
-                resources = original_prepare(labels)
-                pipe_allocations.append(
-                    {
-                        label: resource["parent"]
-                        for label, resource in resources.items()
-                    }
-                )
-                return resources
-
-            globals()["prepare_explicit_parent_pipes"] = recording_prepare
-            try:
-                result = audit_event(
-                    fixtures["clean"].repo.root,
-                    clean_input["event_kind"],
-                    clean_input["payload"],
-                    transaction=transaction,
-                )
-            except BaseException as error:
-                caught = error
-            finally:
-                globals()["prepare_explicit_parent_pipes"] = original_prepare
-            target_descriptors = list(pipe_allocations[1].values())
-            closed_before_reuse = all(
-                descriptor_is_closed(descriptor)
-                for descriptor in target_descriptors
-            )
-            replacements = []
-            try:
-                for _index in range(32):
-                    descriptor = os.open(os.devnull, os.O_RDWR)
-                    replacements.append(descriptor)
-                    if set(target_descriptors).issubset(replacements):
-                        break
-                gc.collect()
-                reused_descriptors_survived = bool(
-                    set(target_descriptors).issubset(replacements)
-                    and all(
-                        not descriptor_is_closed(descriptor)
-                        for descriptor in replacements
-                    )
-                )
-            finally:
-                for descriptor in replacements:
-                    with contextlib.suppress(OSError):
-                        os.close(descriptor)
-            observed_pid = after_spawns[1][1]
-            try:
-                os.kill(observed_pid, 0)
-            except ProcessLookupError:
-                child_reaped = True
-            except PermissionError:
-                child_reaped = False
-            else:
-                child_reaped = False
-            return {
-                "after_spawns": len(after_spawns),
-                "audit_exit": (
-                    result["audit_exit"] if result is not None else None
-                ),
-                "before_spawns": len(before_spawns),
-                "child_reaped": child_reaped,
-                "piped_labels": sorted(pipe_allocations[1]),
-                "pipe_descriptors_closed": closed_before_reuse,
-                "result_git_processes": (
-                    result["metrics"]["git_processes"]
-                    if result is not None else None
-                ),
-                "reused_descriptors_survived_gc": (
-                    reused_descriptors_survived
-                ),
-                "throwable": type(caught).__name__ if caught else None,
-            }
-
-        execution_seam["piped_child_after_spawn"] = {
-            "runtime": piped_child_after_spawn_probe(RuntimeError),
-            "keyboard": piped_child_after_spawn_probe(KeyboardInterrupt),
-        }
-        execution_seam["result_owned_by_audit"] = True
-        invalid_shape = {
-            "adapter_status": "coverage-unavailable",
-            "audit_exit": 2,
-            "after_spawns": 0,
-            "all_pids_concrete": True,
-            "all_pids_unique": True,
-            "all_observed_pids_reaped": None,
-            "ambient_wrapper_calls": 0,
-            "before_spawns": 0,
-            "commands_match": True,
-            "git_subprocesses": 0,
-            "result_git_process_attempts": 0,
-            "result_git_processes": 0,
-            "transaction_entries": 0,
-            "typed_origin_strategy": "U",
-        }
-
-        def is_pre_execution_rejection(item, reason_fragment):
-            return (
-                all(item[key] == value for key, value in invalid_shape.items())
-                and reason_fragment in item["reason"]
-            )
-
-        observed = bool(
-            observations["clean"]["exit"] == 0
-            and observations["clean"]["classification"] == "no-finding"
-            and observations["clean"]["adapter_status"] == "accepted"
-            and observations["blocking"]["exit"] == 1
-            and observations["blocking"]["classification"]
-            == "blocking-finding"
-            and observations["blocking"]["adapter_status"] == "accepted"
-            and observations["unavailable"]["exit"] == 2
-            and observations["unavailable"]["classification"] == "unreadable"
-            and observations["unavailable"]["adapter_status"]
-            == "coverage-unavailable"
-            and all(
-                item["stdout_canonical"]
-                and item["typed_origin_strategy"] == "U"
-                for item in observations.values()
-            )
-            and execution_seam["valid"]["transaction_entries"] == 1
-            and execution_seam["valid"]["git_subprocesses"] > 0
-            and execution_seam["valid"]["before_spawns"]
-            == execution_seam["valid"]["after_spawns"]
-            and execution_seam["valid"]["commands_match"]
-            and execution_seam["valid"]["all_pids_concrete"]
-            and execution_seam["valid"]["all_pids_unique"]
-            and execution_seam["valid"]["result_git_process_attempts"]
-            == execution_seam["valid"]["result_git_processes"]
-            and execution_seam["valid"]["git_subprocesses"]
-            == execution_seam["valid"]["result_git_processes"]
-            and execution_seam["valid"]["typed_origin_strategy"] == "U"
-            and execution_seam["result_owned_by_audit"] is True
-            and is_pre_execution_rejection(
-                execution_seam["invalid"], "local.old is missing"
-            )
-            and all(
-                is_pre_execution_rejection(item, "O and N must be distinct")
-                for item in identical_endpoint_rejections.values()
-            )
-            and all(
-                is_pre_execution_rejection(
-                    item, "budget must be an exact positive integer"
-                )
-                for item in invalid_budget_rejections.values()
-            )
-            and all(
-                is_pre_execution_rejection(
-                    item["observation"], item["reason"]
-                )
-                for item in invalid_runtime_inputs.values()
-            )
-            and execution_seam["spawn_factory_failure"]["audit_exit"] == 2
-            and execution_seam["spawn_factory_failure"][
-                "transaction_entries"
-            ] == 1
-            and execution_seam["spawn_factory_failure"]["before_spawns"] == 1
-            and execution_seam["spawn_factory_failure"]["after_spawns"] == 0
-            and execution_seam["spawn_factory_failure"][
-                "result_git_process_attempts"
-            ] == 1
-            and execution_seam["spawn_factory_failure"][
-                "result_git_processes"
-            ] == 0
-            and all(
-                item["audit_exit"] == 2
-                and item["transaction_entries"] == 1
-                and item["before_spawns"] == 1
-                and item["after_spawns"] == 0
-                and item["result_git_process_attempts"] == 1
-                and item["result_git_processes"] == 0
-                and "Git process factory failed" in item["reason"]
-                for item in execution_seam["factory_throwables"].values()
-            )
-            and execution_seam["after_spawn_base_exception"]["audit_exit"] == 2
-            and execution_seam["after_spawn_base_exception"]["before_spawns"] == 1
-            and execution_seam["after_spawn_base_exception"]["after_spawns"] == 1
-            and execution_seam["after_spawn_base_exception"][
-                "result_git_processes"
-            ] == 1
-            and execution_seam["after_spawn_base_exception"][
-                "all_observed_pids_reaped"
-            ] is True
-            and execution_seam["after_spawn_cancellations"] == {
-                "keyboard": {
-                    "after_spawns": 1,
-                    "all_observed_pids_reaped": True,
-                    "before_spawns": 1,
-                    "cleanup_failure_reported": False,
-                    "transaction_entries": 1,
-                    "throwable": "KeyboardInterrupt",
-                },
-                "system-exit-with-cleanup-report": {
-                    "after_spawns": 1,
-                    "all_observed_pids_reaped": True,
-                    "before_spawns": 1,
-                    "cleanup_failure_reported": True,
-                    "transaction_entries": 1,
-                    "throwable": "SystemExit",
-                },
-            }
-            and execution_seam["piped_child_after_spawn"] == {
-                "runtime": {
-                    "after_spawns": 2,
-                    "audit_exit": 2,
-                    "before_spawns": 2,
-                    "child_reaped": True,
-                    "piped_labels": ["stderr", "stdout"],
-                    "pipe_descriptors_closed": True,
-                    "result_git_processes": 2,
-                    "reused_descriptors_survived_gc": True,
-                    "throwable": None,
-                },
-                "keyboard": {
-                    "after_spawns": 2,
-                    "audit_exit": None,
-                    "before_spawns": 2,
-                    "child_reaped": True,
-                    "piped_labels": ["stderr", "stdout"],
-                    "pipe_descriptors_closed": True,
-                    "result_git_processes": None,
-                    "reused_descriptors_survived_gc": True,
-                    "throwable": "KeyboardInterrupt",
-                },
-            }
-            and execution_seam["ambient_delegating_wrapper"][
-                "ambient_wrapper_calls"
-            ] == 0
-            and execution_seam["ambient_delegating_wrapper"][
-                "before_spawns"
-            ] == execution_seam["ambient_delegating_wrapper"][
-                "after_spawns"
-            ]
-            == execution_seam["ambient_delegating_wrapper"][
-                "result_git_processes"
-            ]
-            and execution_seam["ambient_delegating_wrapper"][
-                "all_pids_unique"
-            ] is True
-            and all(
-                threaded["threads_completed"]
-                and threaded["ambient_factory_restored_exactly"]
-                and threaded["ambient_wrapper_calls"] == 0
-                and threaded["failures"] == [None, None]
-                and threaded["calls"] == [
-                    {
-                        "adapter_status": "accepted",
-                        "after_spawns": 4,
-                        "attempts": 4,
-                        "audit_exit": 0,
-                        "before_spawns": 4,
-                        "classification": "no-finding",
-                        "processes": 4,
-                        "unique_pids": True,
-                    },
-                    {
-                        "adapter_status": "audit-busy",
-                        "after_spawns": 0,
-                        "attempts": 0,
-                        "audit_exit": 2,
-                        "before_spawns": 0,
-                        "classification": "unreadable",
-                        "processes": 0,
-                        "unique_pids": True,
-                    },
-                ]
-                for threaded in execution_seam[
-                    "threaded_serialization"
-                ].values()
-            )
-            and execution_seam["nested_reentry"] == {
-                "nested_actual": 0,
-                "nested_attempts": 0,
-                "nested_status": "audit-busy",
-                "nested_transaction_entries": 0,
-                "outer_actual": 4,
-                "outer_after": 4,
-                "outer_attempts": 4,
-                "outer_before": 4,
-                "outer_exit": 0,
-            }
-            and execution_seam["unrelated_thread_isolation"] == {
-                "ambient_factory_restored_exactly": True,
-                "ambient_wrapper_calls": 1,
-                "observer_after": 1,
-                "observer_before": 1,
-                "owned_actual": 1,
-                "owned_attempts": 1,
-                "unrelated_failure": None,
-                "unrelated_thread_completed": True,
-            }
+    source = HERE.read_text("utf-8")
+    reconcile_source = RECONCILE_PATH.read_text("utf-8")
+    audit_launch_sources = "\n".join(
+        inspect.getsource(subject)
+        for subject in (
+            audit_event,
+            _ordinary_audit,
+            RepositorySession,
+            SessionSubprocess,
+            spawn_git_process,
+            run_git,
+            bounded_git_lines,
+            ObjectDatabase,
+            Graph,
+            Classifier,
         )
-        return {
-            "control": name,
-            "status": "OBSERVED_RED" if observed else "CONTROL_FAILED",
-            "C": "0" * 40,
-            "O": "0" * 40,
-            "N": "0" * 40,
-            "baseline_classification": "three-exit-adapter-contract",
-            "damaged_classification": "metadata-only-workflow-fixture",
-            "expected_baseline": "three-exit-adapter-contract",
-            "authority_edges": [],
-            "propagation_edges": [],
-            "event_adapter_cli_observation": {
-                "cases": observations,
-                "entrypoint": (
-                    "prototype.py --repo ROOT --event-kind KIND "
-                    "--event-payload EVENT.json"
+    )
+    execution_seam["static_contract"] = {
+        "ambient_popen_assignment_absent": re.search(
+            r"subprocess\.Popen\s*=", source
+        )
+        is None,
+        "ambient_run_assignment_absent": re.search(
+            r"subprocess\.run\s*=", source
+        )
+        is None,
+        "audit_runner_has_no_default": (
+            "git_runner" not in (audit_event.__kwdefaults__ or {})
+        ),
+        "audit_paths_have_no_real_fallback": all(
+            name not in audit_launch_sources
+            for name in ("REAL_" + "POPEN", "REAL_" + "RUN")
+        ),
+        "classifier_session_has_no_default": (
+            "session" not in (Classifier.__init__.__kwdefaults__ or {})
+        ),
+        "active_reconciler_has_no_default": (
+            ("BASE_" + "RECONCILE") not in source
+            and "ACTIVE_RECONCILE = contextvars.ContextVar("
+            in source
+        ),
+        "bounded_git_has_no_fixture_launcher": (
+            "command_prefix"
+            not in inspect.signature(bounded_git_lines).parameters
+            and "REAL_POPEN"
+            not in inspect.getsource(bounded_git_lines)
+            and "REAL_RUN" not in inspect.getsource(bounded_git_lines)
+        ),
+        "facade_has_no_ambient_delegate": (
+            "getattr(subprocess" not in inspect.getsource(SessionSubprocess)
+            and "return getattr" not in inspect.getsource(
+                SessionSubprocess.__getattr__
+            )
+        ),
+        "facade_public_surface_closed": {
+            name
+            for name in SessionSubprocess.__dict__
+            if not name.startswith("_")
+        }
+        == {"DEVNULL", "PIPE", "Popen", "TimeoutExpired", "run"},
+        "internal_sessions_have_no_default": all(
+            inspect.signature(subject).parameters["session"].default
+            is inspect.Parameter.empty
+            for subject in (Classifier, Graph, ObjectDatabase, spawn_git_process)
+        ),
+        "main_runner_has_no_default": (
+            "git_runner" not in (main.__kwdefaults__ or {})
+        ),
+        "ordinary_cli_absent": (
+            ("--" + "old") not in source
+            and ("--" + "new") not in source
+            and ("--origin-" + "strategy") not in source
+        ),
+        "public_ordinary_audit_absent": re.search(
+            r"^def ordinary_audit\(", source, re.MULTILINE
+        )
+        is None,
+        "public_strategy_surface_u_only": (
+            "origin_strategy" not in inspect.signature(audit_event).parameters
+            and "origin_strategy" not in inspect.signature(main).parameters
+            and "origin_strategy" not in inspect.signature(
+                _ordinary_audit
+            ).parameters
+            and 'origin_strategy="U"' in inspect.getsource(_ordinary_audit)
+        ),
+        "transaction_wrapper_absent": (
+            ("_ResultBlind" + "Transaction") not in source
+        ),
+        "repository_session_owns_metrics": (
+            "metrics"
+            not in inspect.signature(RepositorySession).parameters
+        ),
+        "repository_session_runner_has_no_default": (
+            inspect.signature(RepositorySession).parameters[
+                "git_runner"
+            ].default
+            is inspect.Parameter.empty
+        ),
+        "runner_result_publication_bridge": (
+            "publish_call_result(" in inspect.getsource(spawn_git_process)
+            and "session.processes," in inspect.getsource(spawn_git_process)
+            and "session.git_runner(command" not in inspect.getsource(
+                spawn_git_process
+            )
+        ),
+        "pipe_result_publication_bridge": (
+            "publish_call_result(raw_pairs, pipe_factory)"
+            in inspect.getsource(prepare_explicit_parent_pipes)
+            and 'publication_boundary("after-pipe-return-publication")'
+            in inspect.getsource(prepare_explicit_parent_pipes)
+        ),
+        "spawn_metrics_derived_from_session": (
+            "metrics"
+            not in inspect.signature(spawn_git_process).parameters
+        ),
+        "reconciler_launch_sites": {
+            "Popen": reconcile_source.count("subprocess.Popen("),
+            "run": reconcile_source.count("subprocess.run("),
+            "total": (
+                reconcile_source.count("subprocess.Popen(")
+                + reconcile_source.count("subprocess.run(")
+            ),
+        },
+    }
+
+    def is_pre_execution_rejection(item, reason_fragment):
+        return (
+            item["audit_exit"] == 2
+            and item["adapter_status"] == "coverage-unavailable"
+            and item["before"] == 0
+            and item["after"] == 0
+            and item["runner_calls"] == 0
+            and item["lifecycle"]["factory"] == 0
+            and reason_fragment in item["reason"]
+        )
+
+    def concurrency_green(probe):
+        return bool(
+            probe["threads_completed"]
+            and probe["failures"] == [None, None]
+            and probe["ambient_popen_identity_unchanged"]
+            and all(
+                call["adapter_status"] == "accepted"
+                and call["audit_exit"] == 0
+                and call["attempts"] == call["created"]
+                == call["before"] == call["after"]
+                and call["created"] > 0
+                and call["pids_unique"]
+                for call in probe["calls"]
+            )
+            and (
+                probe["shared_runner_calls"] is None
+                or probe["shared_runner_calls"]
+                == sum(call["created"] for call in probe["calls"])
+            )
+        )
+
+    valid = execution_seam["valid"]
+    observed = bool(
+        observations["clean"]["exit"] == 0
+        and observations["clean"]["classification"] == "no-finding"
+        and observations["clean"]["adapter_status"] == "accepted"
+        and observations["blocking"]["exit"] == 1
+        and observations["blocking"]["classification"] == "blocking-finding"
+        and observations["blocking"]["adapter_status"] == "accepted"
+        and observations["unavailable"]["exit"] == 2
+        and observations["unavailable"]["classification"] == "unreadable"
+        and observations["unavailable"]["adapter_status"]
+        == "coverage-unavailable"
+        and all(
+            item["stdout_canonical"]
+            and item["typed_origin_strategy"] == "U"
+            and item["typed_results_equal"]
+            for item in observations.values()
+        )
+        and all(
+            item == {
+                "adapter_status": "coverage-unavailable",
+                "audit_exit": 2,
+                "classification": "unreadable",
+                "stdout_canonical": True,
+            }
+            for item in typed_cli_inputs.values()
+        )
+        and valid["audit_exit"] == 0
+        and valid["adapter_status"] == "accepted"
+        and valid["attempts"] == valid["created"]
+        == valid["before"] == valid["after"]
+        == valid["runner_calls"] == valid["runner_created"]
+        and valid["created"] > 0
+        and valid["commands_match"]
+        and valid["all_pids_reaped"]
+        and valid["lifecycle"] == {
+            "factory": 1,
+            "enter": 1,
+            "exit": 1,
+            "exit_after_reap": True,
+            "exit_exception": None,
+        }
+        and not valid["private_modules_leaked"]
+        and is_pre_execution_rejection(
+            execution_seam["invalid"], "local.old is missing"
+        )
+        and all(
+            is_pre_execution_rejection(item, "O and N must be distinct")
+            for item in execution_seam[
+                "identical_endpoint_rejections"
+            ].values()
+        )
+        and all(
+            is_pre_execution_rejection(
+                item, "budget must be an exact positive integer"
+            )
+            for item in execution_seam[
+                "invalid_budget_rejections"
+            ].values()
+        )
+        and all(
+            is_pre_execution_rejection(
+                item,
+                (
+                    "event payload must be a mapping"
+                    if label.startswith("payload")
+                    else "event kind must be a string"
                 ),
-                "execution_seam": execution_seam,
-                "importable_api": {
-                    "endpoint_derivation": (
-                        "event_endpoints(event_kind: str, payload: "
-                        "Mapping[str, Any]) -> EventEndpoints"
-                    ),
-                    "typed_U_audit": (
-                        "audit_event(root: Path, event_kind: str, payload: "
-                        "Mapping[str, Any], *, budget_limit: int | None = "
-                        "None, transaction: Callable[[], ContextManager["
-                        "GitSpawnObserver | None]] | None = None) -> dict"
-                    ),
-                },
-                "payload_grammar": {
-                    "local": ["old", "new"],
-                    "pre-push": ["old", "new"],
-                    "pull-request-synchronize": [
-                        "before", "after", "pull_request.head.sha"
-                    ],
-                    "push": ["before", "after"],
-                },
+            )
+            for label, item in execution_seam[
+                "invalid_runtime_inputs"
+            ].items()
+        )
+        and all(
+            item["audit_exit"] == 2
+            and item["attempts"] == int(ordinal)
+            and item["created"] == int(ordinal) - 1
+            and item["before"] == int(ordinal)
+            and item["after"] == int(ordinal) - 1
+            and item["runner_calls"] == int(ordinal)
+            and item["runner_created"] == int(ordinal) - 1
+            and item["all_pids_reaped"]
+            and "Git process factory failed" in item["reason"]
+            for ordinal, item in execution_seam[
+                "runner_ordinal_failures"
+            ].items()
+        )
+        and all(
+            item["audit_exit"] == 2
+            and item["attempts"] == 1
+            and item["created"] == 0
+            and item["before"] == 1
+            and item["after"] == 0
+            and item["caught"] is None
+            for item in execution_seam["runner_throwables"].values()
+        )
+        and execution_seam["runner_cancellation"]["caught"]
+        == "KeyboardInterrupt"
+        and execution_seam["runner_cancellation"]["all_pids_reaped"]
+        and execution_seam["observer_throwables"]["runtime"]["audit_exit"]
+        == 2
+        and execution_seam["observer_throwables"]["direct-base"]["audit_exit"]
+        == 2
+        and execution_seam["observer_throwables"]["keyboard"]["caught"]
+        == "KeyboardInterrupt"
+        and all(
+            item["all_pids_reaped"]
+            for item in execution_seam["observer_throwables"].values()
+        )
+        and all(
+            item["audit_exit"] == 2
+            and item["caught"] is None
+            and (
+                (stage.startswith("factory") or stage.startswith("enter"))
+                == (item["attempts"] == 0)
+            )
+            and item["lifecycle"]["exit"]
+            == (1 if stage.startswith("exit") else 0)
+            and stage.split("-")[0] in item["reason"]
+            for stage, item in execution_seam[
+                "transaction_throwables"
+            ].items()
+        )
+        and all(
+            item["caught"] == "KeyboardInterrupt"
+            and item["all_pids_reaped"]
+            and item["lifecycle"]["exit"]
+            == (1 if stage == "exit" else 0)
+            for stage, item in execution_seam[
+                "transaction_cancellations"
+            ].items()
+        )
+        and all(
+            item["caught"] == "KeyboardInterrupt"
+            and item["all_pids_reaped"]
+            and item["lifecycle"]["factory"] == 1
+            and item["lifecycle"]["enter"] == 1
+            and item["lifecycle"]["exit"] == 1
+            and item["lifecycle"]["exit_exception"]
+            == "KeyboardInterrupt"
+            and not item["private_modules_leaked"]
+            for item in execution_seam[
+                "trace_cancellation_boundaries"
+            ].values()
+        )
+        and all(
+            item["caught"] == "KeyboardInterrupt"
+            and item["all_runner_pids_reaped"]
+            and item["fd_delta"] == 0
+            and item["lifecycle"]["factory"] == 0
+            and not item["private_modules_leaked"]
+            for item in execution_seam[
+                "session_setup_cancellation_boundaries"
+            ].values()
+        )
+        and all(
+            item["caught"] == "KeyboardInterrupt"
+            and item["all_runner_pids_reaped"]
+            and item["fd_delta"] == 0
+            and item["runner_created"] == 1
+            and item["lifecycle"]["factory"] == 1
+            and item["lifecycle"]["enter"] == 1
+            and item["lifecycle"]["exit"] == 1
+            and item["lifecycle"]["exit_exception"]
+            == "KeyboardInterrupt"
+            and not item["private_modules_leaked"]
+            for item in execution_seam[
+                "spawn_construction_cancellation_boundaries"
+            ].values()
+        )
+        and execution_seam["trace_cancellation_boundaries"][
+            "after-enter"
+        ]["after"] == 0
+        and execution_seam["trace_cancellation_boundaries"][
+            "after-session-close"
+        ]["after"] == valid["after"]
+        and execution_seam["truthy_exit_ignored"]["audit_exit"] == 0
+        and execution_seam["noncallable_runner"]["audit_exit"] == 2
+        and "repository session construction failed: TypeError"
+        in execution_seam["noncallable_runner"]["reason"]
+        and execution_seam["hostile_ambient_subprocess"]["audit_exit"] == 0
+        and execution_seam["hostile_ambient_subprocess"][
+            "popen_identity_unchanged"
+        ]
+        and execution_seam["hostile_ambient_subprocess"]["runner_calls"]
+        == execution_seam["hostile_ambient_subprocess"]["created"]
+        and all(
+            concurrency_green(item)
+            for item in execution_seam["same_module_concurrency"].values()
+        )
+        and concurrency_green(
+            execution_seam["duplicate_module_concurrency"]
+        )
+        and not execution_seam["duplicate_module_concurrency"][
+            "private_modules_leaked"
+        ]
+        and all(execution_seam["cache_isolation"].values())
+        and execution_seam["fixture_date_replay"][
+            "private_modules_removed"
+        ]
+        and execution_seam["fixture_date_replay"][
+            "stable_bytes_oid_identity_and_filed_date"
+        ]
+        and all(
+            replay["ambient_date_unchanged"]
+            and replay["fixed_session_date"] == FIXTURE_DATE.isoformat()
+            for replay in execution_seam["fixture_date_replay"]["replays"]
+        )
+        and execution_seam["nested_reentry"]["nested_status"] == "accepted"
+        and execution_seam["nested_reentry"]["outer_status"] == "accepted"
+        and execution_seam["nested_reentry"]["nested_attempts"]
+        == execution_seam["nested_reentry"]["nested_actual"]
+        and execution_seam["nested_reentry"]["outer_attempts"]
+        == execution_seam["nested_reentry"]["outer_actual"]
+        and all(
+            value is True
+            for key, value in execution_seam["static_contract"].items()
+            if key != "reconciler_launch_sites"
+        )
+        and execution_seam["static_contract"]["reconciler_launch_sites"]
+        == {"Popen": 2, "run": 65, "total": 67}
+        and subprocess.Popen is ambient_popen_identity
+    )
+    return {
+        "control": "event-adapter-cli-entrypoint",
+        "status": "OBSERVED_RED" if observed else "CONTROL_FAILED",
+        "C": "0" * 40,
+        "O": "0" * 40,
+        "N": "0" * 40,
+        "baseline_classification": "three-exit-adapter-contract",
+        "damaged_classification": "ambient-or-shared-session-boundary",
+        "expected_baseline": "three-exit-adapter-contract",
+        "authority_edges": [],
+        "propagation_edges": [],
+        "event_adapter_cli_observation": {
+            "cases": observations,
+            "entrypoint": (
+                "prototype.py --repo ROOT --event-kind KIND "
+                "--event-payload EVENT.json"
+            ),
+            "execution_seam": execution_seam,
+            "importable_api": {
+                "endpoint_derivation": (
+                    "event_endpoints(event_kind: str, payload: "
+                    "Mapping[str, Any]) -> EventEndpoints"
+                ),
+                "typed_U_audit": (
+                    "audit_event(root: Path, event_kind: str, payload: "
+                    "Mapping[str, Any], *, git_runner: TrustedGitRunner, "
+                    "budget_limit: int | None = None, transaction: "
+                    "Callable[[], ContextManager[GitSpawnObserver | None]] "
+                    "| None = None) -> dict"
+                ),
             },
-        }
+            "payload_grammar": {
+                "local": ["old", "new"],
+                "pre-push": ["old", "new"],
+                "pull-request-synchronize": [
+                    "before", "after", "pull_request.head.sha"
+                ],
+                "push": ["before", "after"],
+            },
+            "typed_cli_inputs": typed_cli_inputs,
+        },
+    }
+
+
+def _run_control(name: str, root: Path):
+    if name == "event-adapter-cli-entrypoint":
+        return _event_adapter_control(root)
     if name == "leak-object-database-pipes":
         repo = GitRepository(root)
         initialize(repo)
@@ -15116,11 +16127,13 @@ def run_control(name: str, root: Path):
             def __init__(self, delegate, error_type=OSError):
                 self.delegate = delegate
                 self.error_type = error_type
+                self.close_calls = 0
 
             def __getattr__(self, name):
                 return getattr(self.delegate, name)
 
             def close(self):
+                self.close_calls += 1
                 if self.error_type is OSError:
                     raise OSError(
                         errno.EIO, "injected close-before-delegate"
@@ -15131,6 +16144,7 @@ def run_control(name: str, root: Path):
             """Release the real fd, then inject an object-level throwable."""
 
             def close(self):
+                self.close_calls += 1
                 self.delegate.close()
                 if self.error_type is OSError:
                     raise OSError(
@@ -15153,6 +16167,52 @@ def run_control(name: str, root: Path):
 
         class PipeBaseException(BaseException):
             pass
+
+        def pipe_return_publication_probe(error_type):
+            read_fd, write_fd = os.pipe()
+            supplied = False
+
+            def pipe_factory():
+                nonlocal supplied
+                if supplied:
+                    raise AssertionError("pipe factory called twice")
+                supplied = True
+                return read_fd, write_fd
+
+            def cancel_after_publication(stage):
+                if stage != "after-pipe-return-publication":
+                    raise AssertionError("unexpected pipe publication stage")
+                raise error_type("injected after pipe return publication")
+
+            caught = None
+            try:
+                prepare_explicit_parent_pipes(
+                    ("stdin",),
+                    pipe_factory=pipe_factory,
+                    publication_boundary=cancel_after_publication,
+                )
+            except BaseException as error:
+                caught = type(error).__name__
+            closed = {
+                "read": descriptor_is_closed(read_fd),
+                "write": descriptor_is_closed(write_fd),
+            }
+            for descriptor in (read_fd, write_fd):
+                if not descriptor_is_closed(descriptor):
+                    os.close(descriptor)
+            return {"caught": caught, "closed": closed}
+
+        pipe_return_publication_observations = {
+            error_type.__name__: pipe_return_publication_probe(error_type)
+            for error_type in (KeyboardInterrupt, SystemExit)
+        }
+        pipe_return_publication_safe = all(
+            item["caught"] == error_type
+            and item["closed"] == {"read": True, "write": True}
+            for error_type, item in (
+                pipe_return_publication_observations.items()
+            )
+        )
 
         raising_modes = {
             "raising-close": ("close", OSError, "before"),
@@ -15181,13 +16241,18 @@ def run_control(name: str, root: Path):
         }
 
         def observe(mode: str, damage: Damage | None = None):
-            metrics = Metrics()
+            resource_session = RepositorySession(
+                root,
+                git_runner=_trusted_git_runner(),
+            )
+            metrics = resource_session.metrics
             cleanup_failures = []
             underlying_process = None
             if mode in {"stubborn-close", "stubborn-after-kill"}:
                 database = ObjectDatabase.__new__(ObjectDatabase)
                 database.root = root
                 database.metrics = metrics
+                database.session = resource_session
                 database.damage = damage or Damage()
                 resources = prepare_explicit_parent_pipes(
                     ("stdin", "stdout")
@@ -15203,8 +16268,8 @@ def run_control(name: str, root: Path):
                             "time.sleep(60)"
                         ),
                     ],
-                    stdin=resources["stdin"]["child"],
-                    stdout=resources["stdout"]["child"],
+                    stdin=resources["stdin"]["child"].descriptor,
+                    stdout=resources["stdout"]["child"].descriptor,
                     stderr=subprocess.DEVNULL,
                 )
                 underlying_process._agentfold_owned_pipes = (
@@ -15251,7 +16316,7 @@ def run_control(name: str, root: Path):
 
                     database.process = UnprovableReap(underlying_process)
             else:
-                database = ObjectDatabase(root, metrics, damage=damage)
+                database = ObjectDatabase(resource_session, damage=damage)
             if mode == "after-exit" or mode in raising_modes:
                 database.process.terminate()
                 database.process.wait(timeout=5)
@@ -15263,8 +16328,9 @@ def run_control(name: str, root: Path):
                     raising_modes[mode][2],
                     CloseRaisesBeforeDelegate,
                 )
-                database.process.stdin = wrapper(
-                    database.process.stdin, raising_modes[mode][1]
+                captured_view = database._owned_pipes["stdin"].object_ref
+                captured_view._file_object = wrapper(
+                    captured_view._file_object, raising_modes[mode][1]
                 )
             owned_descriptors = {
                 label: ownership.descriptor
@@ -15337,7 +16403,8 @@ def run_control(name: str, root: Path):
                 },
                 "wrapper_fileno_calls": getattr(
                     database.process.stdin, "fileno_calls", 0
-                ),
+                )
+                + getattr(database.process.stdin, "close_calls", 0),
             }
             # The damaged instance intentionally skips its closure path.  Close
             # the observed descriptors directly after recording the leak so the
@@ -15350,9 +16417,10 @@ def run_control(name: str, root: Path):
                         os.close,
                     )
             for pipe in (database.process.stdin, database.process.stdout):
-                if isinstance(pipe, CloseRaisesBeforeDelegate):
+                file_object = getattr(pipe, "_file_object", pipe)
+                if isinstance(file_object, CloseRaisesBeforeDelegate):
                     with contextlib.suppress(BaseException):
-                        pipe.delegate.close()
+                        file_object.delegate.close()
                 else:
                     with contextlib.suppress(
                         BrokenPipeError, OSError, ValueError
@@ -15389,7 +16457,8 @@ def run_control(name: str, root: Path):
         baseline_closed = all(
             item["stdin_closed"]
             and item["stdout_closed"]
-            and set(item["owned_states"].values()) == {"CLOSED"}
+            and item["owned_states"]["stdout"] == "CLOSED"
+            and item["owned_states"]["stdin"] == "CLOSED"
             and (
                 len(item["cleanup_failures"]) == 2
                 and all(
@@ -15405,22 +16474,7 @@ def run_control(name: str, root: Path):
                 else (
                     item["returncode_is_set"]
                     and item["process_reaps"] == 1
-                    and (
-                        len(item["cleanup_failures"]) == 1
-                        and (
-                            item["cleanup_failures"][0].startswith(
-                                raising_modes[mode][1].__name__ + ":"
-                            )
-                            if raising_modes[mode][1]
-                            in {KeyboardInterrupt, SystemExit}
-                            else (
-                                "cleanup ended closed"
-                                in item["cleanup_failures"][0]
-                            )
-                        )
-                        if mode in raising_modes
-                        else not item["cleanup_failures"]
-                    )
+                    and not item["cleanup_failures"]
                     and (
                         item["killed"]
                         if mode == "stubborn-close"
@@ -15430,7 +16484,7 @@ def run_control(name: str, root: Path):
                     and item["stdin_object_closed"]
                     and (
                         item["wrapper_fileno_calls"] == 0
-                        if mode.startswith("fileno-")
+                        if mode in raising_modes
                         else True
                     )
                 )
@@ -15447,7 +16501,7 @@ def run_control(name: str, root: Path):
         classification_fixture = ordinary_linear_fixture(
             root / "metrics-publication", "metrics-publication", valid=True
         )
-        classification = Classifier(classification_fixture).run()
+        classification = run_classifier(classification_fixture)
         metrics_published_after_close = bool(
             classification["metrics"]["object_process_reaps"] == 1
         )
@@ -15460,35 +16514,36 @@ def run_control(name: str, root: Path):
             wrapped_classifier_descriptors.append(
                 database._owned_pipes["stdin"].descriptor
             )
+            captured_view = database._owned_pipes["stdin"].object_ref
             wrapper = CloseRaisesBeforeDelegate(
-                database.process.stdin, RuntimeError
+                captured_view._file_object, RuntimeError
             )
             wrapped_classifier_pipes.append(wrapper)
-            database.process.stdin = wrapper
+            captured_view._file_object = wrapper
 
         ObjectDatabase.__init__ = init_with_raising_close
         try:
-            recovered_close_result = Classifier(
+            recovered_close_result = run_classifier(
                 ordinary_linear_fixture(
                     root / "raising-close-classifier",
                     "raising-close-classifier",
                     valid=True,
                 )
-            ).run()
+            )
         finally:
             ObjectDatabase.__init__ = original_init
             for wrapper in wrapped_classifier_pipes:
                 with contextlib.suppress(
-                    BrokenPipeError, OSError, ValueError
+                    BrokenPipeError, OSError, ValueError, Unreadable
                 ):
                     wrapper.delegate.close()
-        classifier_fallback_closed = bool(
-            recovered_close_result["audit_exit"] == 2
-            and recovered_close_result["classification"] == "unreadable"
-            and not recovered_close_result["actions"]
-            and "cleanup ended closed" in recovered_close_result[
-                "evidence_verdict"
-            ]["reason"]
+        immutable_backing_bypasses_mutable_view = bool(
+            recovered_close_result["audit_exit"] == 0
+            and recovered_close_result["classification"] == "no-finding"
+            and all(
+                wrapper.close_calls == 0
+                for wrapper in wrapped_classifier_pipes
+            )
             and wrapped_classifier_descriptors
             and all(
                 descriptor_is_closed(descriptor)
@@ -15512,13 +16567,13 @@ def run_control(name: str, root: Path):
         ObjectDatabase.__init__ = init_with_unclosable_pipe
         ObjectDatabase._raw_close_owned_fd = refuse_raw_close
         try:
-            unclosed_result = Classifier(
+            unclosed_result = run_classifier(
                 ordinary_linear_fixture(
                     root / "unclosed-classifier",
                     "unclosed-classifier",
                     valid=True,
                 )
-            ).run()
+            )
             unclosed_before_control_cleanup = bool(
                 unclosed_classifier_descriptors
                 and not descriptor_is_closed(
@@ -15533,7 +16588,7 @@ def run_control(name: str, root: Path):
                     os.close(descriptor)
             for wrapper in wrapped_classifier_pipes:
                 with contextlib.suppress(
-                    BrokenPipeError, OSError, ValueError
+                    BrokenPipeError, OSError, ValueError, Unreadable
                 ):
                     wrapper.delegate.close()
         unclosed_descriptor_failed_closed = bool(
@@ -15541,55 +16596,314 @@ def run_control(name: str, root: Path):
             and unclosed_result["audit_exit"] == 2
             and unclosed_result["classification"] == "unreadable"
             and not unclosed_result["actions"]
-            and "descriptor cleanup failed" in unclosed_result[
-                "evidence_verdict"
-            ]["reason"]
+            and "descriptor state remains unknown"
+            in unclosed_result["evidence_verdict"]["reason"]
         )
 
-        reuse_metrics = Metrics()
-        reuse_database = ObjectDatabase(root, reuse_metrics)
-        reuse_database.process.terminate()
-        reuse_database.process.wait(timeout=5)
-        reused_descriptor = reuse_database._owned_pipes["stdin"].descriptor
-        reuse_wrapper = CloseRaisesBeforeDelegate(
-            reuse_database.process.stdin, RuntimeError
+        def install_replacement(descriptor: int, sentinel: Path) -> int:
+            donor = os.open(
+                sentinel,
+                os.O_RDWR | os.O_CREAT | os.O_TRUNC,
+                0o600,
+            )
+            if donor != descriptor:
+                os.dup2(donor, descriptor)
+                os.close(donor)
+            return descriptor
+
+        class CloseAndReuseIfInvoked:
+            """A public replacement that must never receive close authority."""
+
+            def __init__(self, delegate, descriptor, sentinel, *, throws):
+                self.delegate = delegate
+                self.descriptor = descriptor
+                self.sentinel = sentinel
+                self.throws = throws
+                self.calls = 0
+                self.replacement = None
+
+            def __getattr__(self, name):
+                return getattr(self.delegate, name)
+
+            def close(self):
+                self.calls += 1
+                os.close(self.descriptor)
+                self.replacement = install_replacement(
+                    self.descriptor, self.sentinel
+                )
+                os.write(self.replacement, b"hostile-callback")
+                if self.throws:
+                    raise RuntimeError("injected replacement close failure")
+
+        def substituted_pipe_probe(label: str, *, throws: bool):
+            session = RepositorySession(
+                root,
+                git_runner=_trusted_git_runner(),
+            )
+            database = ObjectDatabase(session)
+            database.process.terminate()
+            database.process.wait(timeout=5)
+            descriptor = database._owned_pipes["stdin"].descriptor
+            sentinel = root / f"substituted-{label}"
+            wrapper = CloseAndReuseIfInvoked(
+                database.process.stdin,
+                descriptor,
+                sentinel,
+                throws=throws,
+            )
+            database.process.stdin = wrapper
+            failure = None
+            try:
+                database.close()
+            except BaseException as error:
+                failure = f"{type(error).__name__}:{error}"
+            replacement_descriptors = []
+            try:
+                for _index in range(8):
+                    candidate = os.open(os.devnull, os.O_RDWR)
+                    replacement_descriptors.append(candidate)
+                    if candidate == descriptor:
+                        break
+                repeated_failures = []
+                for operation in (database.close, database.abort):
+                    try:
+                        operation()
+                    except BaseException as error:
+                        repeated_failures.append(
+                            f"{type(error).__name__}:{error}"
+                        )
+                gc.collect()
+                return {
+                    "cleanup_failure": failure,
+                    "descriptor_reused": descriptor in replacement_descriptors,
+                    "owned_state": database._owned_pipes["stdin"].state,
+                    "replacement_close_calls": wrapper.calls,
+                    "replacement_survived": (
+                        descriptor in replacement_descriptors
+                        and not descriptor_is_closed(descriptor)
+                    ),
+                    "repeated_failures": repeated_failures,
+                    "sentinel_created": sentinel.exists(),
+                }
+            finally:
+                for candidate in replacement_descriptors:
+                    with contextlib.suppress(OSError):
+                        os.close(candidate)
+
+        substituted_pipe_observations = {
+            "close-reuse-return": substituted_pipe_probe(
+                "return", throws=False
+            ),
+            "close-reuse-throw": substituted_pipe_probe(
+                "throw", throws=True
+            ),
+        }
+        forced_fd_reuse_safe = all(
+            item["cleanup_failure"] is not None
+            and "cleanup ended closed" in item["cleanup_failure"]
+            and item["descriptor_reused"]
+            and item["owned_state"] == "CLOSED"
+            and item["replacement_close_calls"] == 0
+            and item["replacement_survived"]
+            and not item["repeated_failures"]
+            and not item["sentinel_created"]
+            for item in substituted_pipe_observations.values()
         )
-        reuse_database.process.stdin = reuse_wrapper
-        reuse_failure = None
-        try:
-            reuse_database.close()
-        except BaseException as error:
-            reuse_failure = f"{type(error).__name__}:{error}"
-        replacement_descriptors = []
-        try:
-            for _index in range(8):
-                descriptor = os.open(os.devnull, os.O_RDWR)
-                replacement_descriptors.append(descriptor)
-                if descriptor == reused_descriptor:
-                    break
-            repeated_failures = []
-            for operation in (reuse_database.close, reuse_database.abort):
-                try:
-                    operation()
-                except BaseException as error:
-                    repeated_failures.append(
-                        f"{type(error).__name__}:{error}"
+
+        def raw_token_probe(stage: str, error_type=None):
+            read_fd, write_fd = os.pipe()
+            os.close(write_fd)
+            token = OwnedPipe(f"raw-{stage}", None, read_fd)
+            sentinel = root / (
+                "raw-token-"
+                + stage
+                + "-"
+                + (error_type.__name__ if error_type else "success")
+            )
+            calls = 0
+            replacement = None
+
+            def raw_close(descriptor):
+                nonlocal calls, replacement
+                calls += 1
+                if stage == "pre":
+                    raise error_type("injected raw pre-delegate failure")
+                os.close(descriptor)
+                if stage in {"post", "success-reuse"}:
+                    replacement = install_replacement(
+                        descriptor, sentinel
                     )
-            forced_fd_reuse_safe = bool(
-                reused_descriptor in replacement_descriptors
-                and reuse_failure is not None
-                and "cleanup ended closed" in reuse_failure
-                and not repeated_failures
-                and reuse_database._owned_pipes["stdin"].state == "CLOSED"
+                    os.write(replacement, b"before-repeat")
+                if stage == "post":
+                    raise error_type("injected raw post-delegate failure")
+
+            caught = None
+            try:
+                close_raw_owned_pipe(token, raw_close)
+            except BaseException as error:
+                caught = type(error).__name__
+            state_after_first = token.state
+            descriptor_tombstoned = token.descriptor is None
+            if stage == "pre":
+                # The injected callback did not close the original fd.  The
+                # control owns that deliberate leak, closes it externally,
+                # then forces the same integer to name unrelated storage.
+                os.close(read_fd)
+                replacement = install_replacement(read_fd, sentinel)
+                os.write(replacement, b"before-repeat")
+            repeated = []
+            for _index in range(2):
+                try:
+                    close_raw_owned_pipe(token, raw_close)
+                except BaseException as error:
+                    repeated.append(f"{type(error).__name__}:{error}")
+            gc.collect()
+            replacement_survived = None
+            if replacement is not None:
+                try:
+                    os.write(replacement, b"-after-repeat")
+                    replacement_survived = not descriptor_is_closed(
+                        replacement
+                    )
+                finally:
+                    os.close(replacement)
+            return {
+                "caught": caught,
+                "close_calls": calls,
+                "descriptor_tombstoned": descriptor_tombstoned,
+                "replacement_bytes": (
+                    sentinel.read_bytes() if sentinel.exists() else b""
+                ).decode("ascii"),
+                "replacement_survived": replacement_survived,
+                "repeated_failures": repeated,
+                "state": state_after_first,
+            }
+
+        raw_token_observations = {
+            "success": raw_token_probe("success"),
+            "success-reuse": raw_token_probe("success-reuse"),
+            "pre-runtime": raw_token_probe("pre", RuntimeError),
+            "post-runtime": raw_token_probe("post", RuntimeError),
+            "pre-keyboard": raw_token_probe("pre", KeyboardInterrupt),
+            "post-keyboard": raw_token_probe("post", KeyboardInterrupt),
+            "pre-system-exit": raw_token_probe("pre", SystemExit),
+            "post-system-exit": raw_token_probe("post", SystemExit),
+        }
+        raw_token_state_machine_safe = bool(
+            raw_token_observations["success"] == {
+                "caught": None,
+                "close_calls": 1,
+                "descriptor_tombstoned": True,
+                "replacement_bytes": "",
+                "replacement_survived": None,
+                "repeated_failures": [],
+                "state": "CLOSED",
+            }
+            and raw_token_observations["success-reuse"] == {
+                "caught": None,
+                "close_calls": 1,
+                "descriptor_tombstoned": True,
+                "replacement_bytes": "before-repeat-after-repeat",
+                "replacement_survived": True,
+                "repeated_failures": [],
+                "state": "CLOSED",
+            }
+            and all(
+                item["state"] == "UNKNOWN"
+                and item["descriptor_tombstoned"]
+                and item["close_calls"] == 1
+                and item["replacement_survived"] is True
+                and item["replacement_bytes"]
+                == "before-repeat-after-repeat"
+                and len(item["repeated_failures"]) == 2
                 and all(
-                    not descriptor_is_closed(descriptor)
-                    for descriptor in replacement_descriptors
+                    "descriptor state remains unknown" in failure
+                    for failure in item["repeated_failures"]
+                )
+                for label, item in raw_token_observations.items()
+                if label not in {"success", "success-reuse"}
+            )
+        )
+
+        def rollback_probe(stage: str, error_type):
+            read_fd, write_fd = os.pipe()
+            supplied = False
+            calls = []
+            sentinel = root / (
+                f"rollback-{stage}-{error_type.__name__}"
+            )
+            replacement = None
+
+            def pipe_factory():
+                nonlocal supplied
+                if supplied:
+                    raise AssertionError("pipe factory called twice")
+                supplied = True
+                return read_fd, write_fd
+
+            def raw_close(descriptor):
+                nonlocal replacement
+                calls.append(descriptor)
+                if descriptor == read_fd:
+                    if stage == "post":
+                        os.close(descriptor)
+                        replacement = install_replacement(
+                            descriptor, sentinel
+                        )
+                        os.write(replacement, b"rollback")
+                    raise error_type("injected rollback close failure")
+                os.close(descriptor)
+
+            caught = None
+            try:
+                prepare_explicit_parent_pipes(
+                    ("invalid",),
+                    pipe_factory=pipe_factory,
+                    raw_close=raw_close,
+                )
+            except BaseException as error:
+                caught = type(error).__name__
+            if stage == "pre":
+                os.close(read_fd)
+                replacement = install_replacement(read_fd, sentinel)
+                os.write(replacement, b"rollback")
+            gc.collect()
+            os.write(replacement, b"-survived")
+            replacement_survived = not descriptor_is_closed(replacement)
+            os.close(replacement)
+            return {
+                "caught": caught,
+                "close_calls": calls,
+                "replacement_bytes": sentinel.read_text("ascii"),
+                "replacement_survived": replacement_survived,
+                "write_end_closed": descriptor_is_closed(write_fd),
+            }
+
+        rollback_observations = {
+            "pre-runtime": rollback_probe("pre", RuntimeError),
+            "post-runtime": rollback_probe("post", RuntimeError),
+            "pre-keyboard": rollback_probe("pre", KeyboardInterrupt),
+            "post-keyboard": rollback_probe("post", KeyboardInterrupt),
+            "pre-system-exit": rollback_probe("pre", SystemExit),
+            "post-system-exit": rollback_probe("post", SystemExit),
+        }
+        rollback_failure_safe = all(
+            item["caught"]
+            == (
+                "KeyboardInterrupt"
+                if label.endswith("keyboard")
+                else (
+                    "SystemExit"
+                    if label.endswith("system-exit")
+                    else "Unreadable"
                 )
             )
-        finally:
-            for descriptor in replacement_descriptors:
-                with contextlib.suppress(OSError):
-                    os.close(descriptor)
+            and len(item["close_calls"]) == 2
+            and item["replacement_bytes"] == "rollback-survived"
+            and item["replacement_survived"]
+            and item["write_end_closed"]
+            for label, item in rollback_observations.items()
+        )
 
         cancellation_resources = prepare_explicit_parent_pipes(
             ("stdin", "stdout")
@@ -15604,8 +16918,8 @@ def run_control(name: str, root: Path):
                     "os.write(1,b'R');time.sleep(60)"
                 ),
             ],
-            stdin=cancellation_resources["stdin"]["child"],
-            stdout=cancellation_resources["stdout"]["child"],
+            stdin=cancellation_resources["stdin"]["child"].descriptor,
+            stdout=cancellation_resources["stdout"]["child"].descriptor,
             stderr=subprocess.DEVNULL,
         )
         cancellation_child._agentfold_owned_pipes = (
@@ -15650,7 +16964,13 @@ def run_control(name: str, root: Path):
 
         cancellation_database = ObjectDatabase.__new__(ObjectDatabase)
         cancellation_database.root = root
-        cancellation_database.metrics = Metrics()
+        cancellation_database.session = RepositorySession(
+            root,
+            git_runner=_trusted_git_runner(),
+        )
+        cancellation_database.metrics = (
+            cancellation_database.session.metrics
+        )
         cancellation_database.damage = Damage()
         cancellation_database.process = ThrowableCleanupProcess(
             cancellation_child
@@ -15691,13 +17011,13 @@ def run_control(name: str, root: Path):
 
         ObjectDatabase.close = close_then_report_unproved_reap
         try:
-            cleanup_failure_result = Classifier(
+            cleanup_failure_result = run_classifier(
                 ordinary_linear_fixture(
                     root / "cleanup-failure",
                     "cleanup-failure",
                     valid=True,
                 )
-            ).run()
+            )
         finally:
             ObjectDatabase.close = original_close
         cleanup_failure_closed = bool(
@@ -15713,9 +17033,12 @@ def run_control(name: str, root: Path):
             baseline_closed
             and damaged_leaked
             and metrics_published_after_close
-            and classifier_fallback_closed
+            and immutable_backing_bypasses_mutable_view
             and unclosed_descriptor_failed_closed
             and forced_fd_reuse_safe
+            and raw_token_state_machine_safe
+            and rollback_failure_safe
+            and pipe_return_publication_safe
             and cancellation_cleanup_completed
             and cleanup_failure_closed
         )
@@ -15736,11 +17059,28 @@ def run_control(name: str, root: Path):
                 "metrics_published_after_close": (
                     metrics_published_after_close
                 ),
-                "classifier_fallback_closed": classifier_fallback_closed,
+                "immutable_backing_bypasses_mutable_view": (
+                    immutable_backing_bypasses_mutable_view
+                ),
                 "unclosed_descriptor_failed_closed": (
                     unclosed_descriptor_failed_closed
                 ),
                 "forced_fd_reuse_safe": forced_fd_reuse_safe,
+                "substituted_pipe_observations": (
+                    substituted_pipe_observations
+                ),
+                "raw_token_observations": raw_token_observations,
+                "raw_token_state_machine_safe": (
+                    raw_token_state_machine_safe
+                ),
+                "rollback_observations": rollback_observations,
+                "rollback_failure_safe": rollback_failure_safe,
+                "pipe_return_publication_observations": (
+                    pipe_return_publication_observations
+                ),
+                "pipe_return_publication_safe": (
+                    pipe_return_publication_safe
+                ),
                 "cancellation_cleanup_completed": (
                     cancellation_cleanup_completed
                 ),
@@ -15770,7 +17110,6 @@ def run_control(name: str, root: Path):
             "malformed": (b"a" * 40) + b"\nnot-an-oid\n",
             "truncated": (b"a" * 40) + b"\n" + (b"b" * 39),
         }.items():
-            metrics = Metrics()
             local_rows = []
 
             def receive(line: bytes):
@@ -15784,17 +17123,28 @@ def run_control(name: str, root: Path):
                 + ");sys.stdout.flush()"
             )
             reason = None
+
+            def fixture_stream_runner(_command, *args, **kwargs):
+                return REAL_POPEN(
+                    [sys.executable, "-c", script], *args, **kwargs
+                )
+
+            stream_session = RepositorySession(
+                root,
+                git_runner=fixture_stream_runner,
+            )
+            metrics = stream_session.metrics
             try:
                 bounded_git_lines(
-                    root,
-                    metrics,
-                    ("-c", script),
+                    stream_session,
+                    ("fixture-bounded-output",),
                     counter_prefix="graph",
                     line_callback=receive,
-                    command_prefix=(sys.executable,),
                 )
             except Unreadable as error:
                 reason = str(error)
+            finally:
+                stream_session.close()
             observations[variant] = {
                 "reason": reason,
                 "local_rows_before_failure": len(local_rows),
@@ -15830,10 +17180,10 @@ def run_control(name: str, root: Path):
             with temporary_environment(
                 LANG=locale, LANGUAGE=locale, LC_ALL=locale, TZ="UTC"
             ):
-                stable[locale] = Classifier(fixture).run()
-                ambient[locale] = Classifier(
+                stable[locale] = run_classifier(fixture)
+                ambient[locale] = run_classifier(
                     fixture, Damage(ambient_git_diagnostics=True)
-                ).run()
+                )
         stable_reasons = {
             locale: result["evidence_verdict"]["reason"]
             for locale, result in stable.items()
@@ -15872,8 +17222,8 @@ def run_control(name: str, root: Path):
             },
         }
     fixture, damage, damaged_expected = control_builder(name, root)
-    baseline = Classifier(fixture).run()
-    damaged = Classifier(fixture, damage).run()
+    baseline = run_classifier(fixture)
+    damaged = run_classifier(fixture, damage)
     budget_observation = None
     if name == "buffered-graph-output":
         raw_bytes = fixture.details["budget_contract"]["raw_graph_bytes"]
@@ -15962,6 +17312,12 @@ def run_control(name: str, root: Path):
     return result
 
 
+def run_control(name: str, root: Path):
+    """Construct each control under a private reconciler fixture session."""
+    with _fixture_repository_session(root):
+        return _run_control(name, root)
+
+
 def prepare_root(path: Path):
     if path.exists() and any(path.iterdir()):
         raise RuntimeError(f"fixture directory is not empty: {path}")
@@ -16022,9 +17378,14 @@ def run_suite(root: Path, *, reverse_construction: bool = False):
         builders.reverse()
     for index, builder in enumerate(builders, start=1):
         fixture_root = root / f"{index:02d}"
-        fixture = builder(fixture_root)
+        with _fixture_repository_session(fixture_root):
+            fixture = builder(fixture_root)
         result = run_fixture(fixture)
-        errors = validate_result(result)
+        # Result validation uses reconciler parsing predicates but performs no
+        # production audit.  Give even this fixture-only phase a fresh private
+        # module rather than reopening an ambient reconciler fallback.
+        with _fixture_repository_session(fixture_root):
+            errors = validate_result(result)
         if errors:
             failures.append({"scenario": result["scenario"], "errors": errors})
         results.append(result)
@@ -16315,65 +17676,86 @@ def run_suite(root: Path, *, reverse_construction: bool = False):
     return 0 if not failures else 1
 
 
-def ordinary_audit(
-    root: Path,
+def _typed_event_failure(
+    event_kind: Any,
+    reason: str,
+    metrics: Metrics,
+    endpoints: EventEndpoints | None = None,
+) -> dict:
+    zero = "0" * 40
+    O = endpoints.O if endpoints is not None else zero
+    N = endpoints.N if endpoints is not None else zero
+    event_adapter = (
+        endpoints.evidence()
+        if endpoints is not None
+        else {
+            "N": zero,
+            "O": zero,
+            "endpoint_sources": [],
+            "event_kind": event_kind,
+            "github_sha_used": False,
+            "mutable_metadata_invariant": True,
+            "mutable_state_reads": 0,
+            "provider_api_calls": 0,
+            "reason": reason,
+            "status": "coverage-unavailable",
+            "typed_origin_strategy": "U",
+        }
+    )
+    return {
+        "scenario": "ordinary-event-audit",
+        "C": None,
+        "O": O,
+        "N": N,
+        "input_contract": {
+            "schema": "restack-provenance-input/v2",
+            "authoritative_endpoints": ["O", "N"],
+            "origin_strategy": "U",
+        },
+        "audit_exit": 2,
+        "classification": "unreadable",
+        "evidence_verdict": {
+            "status": "unreadable",
+            "reason": reason,
+        },
+        "event_mode": "none",
+        "authority_edges": [],
+        "propagation_edges": [],
+        "mutation_edges": [],
+        "support_checks": [],
+        "carry_proofs": [],
+        "actions": [],
+        "metrics": metrics.as_dict(),
+        "event_adapter": event_adapter,
+    }
+
+
+def _ordinary_audit(
+    session: RepositorySession,
     O: str,
     N: str,
     budget_limit: int | None,
-    origin_strategy: str,
 ) -> dict:
-    """Audit exactly two immutable O,N commit IDs in an existing repository."""
-    valid_oid = lambda value: (
-        len(value) in {40, 64}
-        and all(char in "0123456789abcdef" for char in value)
-    )
-    if (
-        not valid_oid(O)
-        or not valid_oid(N)
-        or not valid_budget_limit(budget_limit)
-    ):
-        reason = (
-            "O and N must be full lowercase hexadecimal object IDs"
-            if not valid_oid(O) or not valid_oid(N)
-            else "budget must be an exact positive integer"
-        )
-        return {
-            "scenario": "ordinary-audit",
-            "C": None,
-            "O": O,
-            "N": N,
-            "input_contract": {
-                "schema": "restack-provenance-input/v2",
-                "authoritative_endpoints": ["O", "N"],
-                "origin_strategy": origin_strategy,
-            },
-            "audit_exit": 2,
-            "classification": "unreadable",
-            "evidence_verdict": {"status": "unreadable", "reason": reason},
-            "event_mode": "none",
-            "authority_edges": [],
-            "propagation_edges": [],
-            "mutation_edges": [],
-            "support_checks": [],
-            "carry_proofs": [],
-            "actions": [],
-            "metrics": Metrics().as_dict(),
-        }
+    """Private Strategy-U classifier behind the typed event boundary."""
     fixture = Fixture(
-        "ordinary-audit",
-        RepositoryView(root),
+        "ordinary-event-audit",
+        RepositoryView(session.root),
         "",
         O,
         "",
         N,
         "",
         budget_limit=budget_limit,
-        origin_strategy=origin_strategy,
+        origin_strategy="U",
     )
-    result = Classifier(fixture).run()
+    result = Classifier(fixture, session=session).run()
     result.pop("expected_result", None)
     result.pop("details", None)
     return result
+
+
+def _transaction_boundary(_name: str) -> None:
+    """Named no-op used by deterministic cancellation boundary controls."""
 
 
 def audit_event(
@@ -16381,6 +17763,7 @@ def audit_event(
     event_kind: str,
     payload: Mapping[str, Any],
     *,
+    git_runner: TrustedGitRunner,
     budget_limit: int | None = None,
     transaction: Callable[
         [], ContextManager[GitSpawnObserver | None]
@@ -16388,13 +17771,9 @@ def audit_event(
 ) -> dict:
     """Run typed Strategy U from exact endpoints in an immutable event.
 
-    ``transaction`` is a narrow accounting seam.  For a valid event, this
-    function enters exactly one caller-supplied context.  The context may yield
-    a ``GitSpawnObserver`` that sees immutable before/after notifications for
-    each Git child while this function itself constructs commands and executes
-    the complete audit.  Invalid event publication never calls the factory.
-    The caller never receives the operation or result and cannot select a
-    different origin strategy, endpoints, or classification.
+    ``git_runner`` is mandatory launch authority; ambient ``subprocess.Popen``
+    is never consulted. ``transaction`` is a result-blind accounting seam.
+    Invalid input enters neither a session nor a transaction.
     """
     try:
         if not valid_budget_limit(budget_limit):
@@ -16403,139 +17782,191 @@ def audit_event(
             )
         endpoints = event_endpoints(event_kind, payload)
     except EventInputError as error:
-        zero = "0" * 40
-        return {
-            "scenario": "ordinary-event-audit",
-            "C": None,
-            "O": zero,
-            "N": zero,
-            "input_contract": {
-                "schema": "restack-provenance-input/v2",
-                "authoritative_endpoints": ["O", "N"],
-                "origin_strategy": "U",
-            },
-            "audit_exit": 2,
-            "classification": "unreadable",
-            "evidence_verdict": {
-                "status": "unreadable",
-                "reason": str(error),
-            },
-            "event_mode": "none",
-            "authority_edges": [],
-            "propagation_edges": [],
-            "mutation_edges": [],
-            "support_checks": [],
-            "carry_proofs": [],
-            "actions": [],
-            "metrics": Metrics().as_dict(),
-            "event_adapter": {
-                "N": zero,
-                "O": zero,
-                "endpoint_sources": [],
-                "event_kind": event_kind,
-                "github_sha_used": False,
-                "mutable_metadata_invariant": True,
-                "mutable_state_reads": 0,
-                "provider_api_calls": 0,
-                "reason": str(error),
-                "status": "coverage-unavailable",
-                "typed_origin_strategy": "U",
-            },
-        }
-    if not AUDIT_SINGLE_FLIGHT.acquire(blocking=False):
-        busy_reason = (
-            "audit-busy: another production-helper audit owns the "
-            "process-local compatibility boundary"
+        return _typed_event_failure(
+            event_kind, str(error), Metrics(), None
         )
-        event_adapter = endpoints.evidence()
-        event_adapter.update(
-            {"reason": busy_reason, "status": "audit-busy"}
-        )
-        return {
-            "scenario": "ordinary-event-audit",
-            "C": None,
-            "O": endpoints.O,
-            "N": endpoints.N,
-            "input_contract": {
-                "schema": "restack-provenance-input/v2",
-                "authoritative_endpoints": ["O", "N"],
-                "origin_strategy": "U",
-            },
-            "audit_exit": 2,
-            "classification": "unreadable",
-            "evidence_verdict": {
-                "status": "unreadable", "reason": busy_reason
-            },
-            "event_mode": "none",
-            "authority_edges": [],
-            "propagation_edges": [],
-            "mutation_edges": [],
-            "support_checks": [],
-            "carry_proofs": [],
-            "actions": [],
-            "metrics": Metrics().as_dict(),
-            "event_adapter": event_adapter,
-        }
+
+    metrics = Metrics()
     try:
-        scope = (
-            contextlib.nullcontext()
-            if transaction is None
-            else transaction()
+        session = RepositorySession(
+            root,
+            git_runner=git_runner,
         )
-        with scope as observer:
-            with observe_git_spawns(observer):
-                result = ordinary_audit(
-                    root, endpoints.O, endpoints.N, budget_limit, "U"
+    except BaseException as error:
+        if is_cancellation(error):
+            raise
+        return _typed_event_failure(
+            event_kind,
+            "repository session construction failed: "
+            + type(error).__name__,
+            metrics,
+            endpoints,
+        )
+    metrics = session.metrics
+
+    failures: list[tuple[str, BaseException]] = []
+    result = None
+    transaction_scope = None
+    transaction_entered = False
+    unexpected = None
+    try:
+        try:
+            session.open()
+        except BaseException as error:
+            failures.append(("repository session setup", error))
+        if not failures:
+            try:
+                transaction_scope = (
+                    contextlib.nullcontext()
+                    if transaction is None
+                    else transaction()
                 )
-        result["event_adapter"] = endpoints.evidence()
-        return result
+            except BaseException as error:
+                failures.append(("transaction factory", error))
+        if not failures:
+            propagated = None
+            try:
+                # Use the caller's context manager directly.  A Python wrapper
+                # around __enter__/__exit__ creates cancellation gaps after
+                # delegate entry and before delegate exit.  Retaining primary
+                # failures in our own list prevents a truthy __exit__ from
+                # erasing the audit or cleanup result.
+                with transaction_scope as observer:
+                    transaction_entered = True
+                    try:
+                        _transaction_boundary("after-enter")
+                        session.observer = observer
+                        try:
+                            result = _ordinary_audit(
+                                session,
+                                endpoints.O,
+                                endpoints.N,
+                                budget_limit,
+                            )
+                        except BaseException as error:
+                            failures.append(("audit execution", error))
+                    finally:
+                        # Cleanup remains inside the accounting context.  The
+                        # nested finally makes the close-to-exit handoff safe
+                        # even when cancellation arrives at a line boundary.
+                        try:
+                            session.close()
+                        except BaseException as error:
+                            failures.append(
+                                ("repository session cleanup", error)
+                            )
+                        finally:
+                            _transaction_boundary("after-session-close")
+                            session.observer = None
+                    primary_error = failures[0][1] if failures else None
+                    if primary_error is not None:
+                        # Raise inside the with so the delegate receives the
+                        # real primary tuple.  The retained failure remains
+                        # authoritative even if the delegate returns true.
+                        raise primary_error
+            except BaseException as error:
+                propagated = error
+            if propagated is not None and not any(
+                propagated is error for _stage, error in failures
+            ):
+                failures.append(
+                    (
+                        (
+                            "transaction enter"
+                            if not transaction_entered
+                            else (
+                                "transaction exit"
+                                if session._closed
+                                and not failures
+                                else "audit execution"
+                            )
+                        ),
+                        propagated,
+                    )
+                )
+    except BaseException as error:
+        unexpected = error
     finally:
-        AUDIT_SINGLE_FLIGHT.release()
+        # Factory/enter failure has no entered context, so this is the required
+        # fallback cleanup.  On an entered path close is already idempotently
+        # complete before __exit__.
+        if not session._closed:
+            try:
+                session.close()
+            except BaseException as error:
+                failures.append(
+                    ("repository session cleanup", error)
+                )
+        session.observer = None
+    if unexpected is not None and not any(
+        unexpected is error for _stage, error in failures
+    ):
+        failures.append(("audit execution", unexpected))
+
+    cancellation = next(
+        (
+            error
+            for _stage, error in failures
+            if is_cancellation(error)
+        ),
+        None,
+    )
+    if cancellation is not None:
+        notes = [
+            f"{stage} failed: {cleanup_failure_text(error)}"
+            for stage, error in failures
+            if error is not cancellation
+        ]
+        if notes:
+            cancellation.add_note("; ".join(dict.fromkeys(notes)))
+        raise cancellation
+    if failures:
+        reason = "; ".join(
+            dict.fromkeys(
+                f"{stage} failed: {type(error).__name__}"
+                for stage, error in failures
+            )
+        )
+        return _typed_event_failure(
+            event_kind, reason, metrics, endpoints
+        )
+    if result is None:
+        return _typed_event_failure(
+            event_kind,
+            "audit execution failed: no result",
+            metrics,
+            endpoints,
+        )
+    result["metrics"] = metrics.as_dict()
+    result["event_adapter"] = endpoints.evidence()
+    return result
 
 
-def main(argv=None):
+def main(argv=None, *, git_runner: TrustedGitRunner):
     parser = argparse.ArgumentParser()
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--reverse-construction", action="store_true")
     parser.add_argument("--control", choices=CONTROL_NAMES)
     parser.add_argument("--fixtures-dir", type=Path)
     parser.add_argument("--repo", type=Path)
-    parser.add_argument("--old", metavar="O")
-    parser.add_argument("--new", metavar="N")
-    parser.add_argument(
-        "--event-kind",
-        choices=(
-            "local",
-            "pre-push",
-            "push",
-            "pull-request-synchronize",
-        ),
-    )
+    parser.add_argument("--event-kind")
     parser.add_argument("--event-payload", type=Path)
     parser.add_argument("--budget", type=int)
-    parser.add_argument("--origin-strategy", choices=("U", "B"), default="U")
     arguments = parser.parse_args(argv)
     event_mode = any(
         value is not None
         for value in (arguments.event_kind, arguments.event_payload)
     )
-    ordinary = any(
-        value is not None
-        for value in (arguments.old, arguments.new)
-    ) or (arguments.repo is not None and not event_mode)
     selected = (
         int(arguments.self_test)
         + int(arguments.control is not None)
-        + int(ordinary)
         + int(event_mode)
     )
     if selected != 1:
         parser.error(
-            "choose exactly one of --self-test, --control, "
-            "--repo/--old/--new, or --repo/--event-kind/--event-payload"
+            "choose exactly one of --self-test, --control, or "
+            "--repo/--event-kind/--event-payload"
         )
-    if ordinary and None in (arguments.repo, arguments.old, arguments.new):
-        parser.error("ordinary audit requires --repo, --old O, and --new N")
     if event_mode and None in (
         arguments.repo,
         arguments.event_kind,
@@ -16546,29 +17977,24 @@ def main(argv=None):
         )
     if arguments.reverse_construction and not arguments.self_test:
         parser.error("--reverse-construction requires --self-test")
-    if ordinary:
-        result = ordinary_audit(
-            arguments.repo.resolve(),
-            arguments.old,
-            arguments.new,
-            arguments.budget,
-            arguments.origin_strategy,
-        )
-        emit_json(result)
-        return result["audit_exit"]
     if event_mode:
         try:
             payload = json.loads(arguments.event_payload.read_text("utf-8"))
         except (OSError, UnicodeError, json.JSONDecodeError) as error:
-            parser.error(f"could not read event payload: {error}")
-        if not isinstance(payload, dict):
-            parser.error("event payload must be a JSON object")
-        result = audit_event(
-            arguments.repo.resolve(),
-            arguments.event_kind,
-            payload,
-            budget_limit=arguments.budget,
-        )
+            result = _typed_event_failure(
+                arguments.event_kind,
+                "coverage-unavailable: event payload could not be read: "
+                + type(error).__name__,
+                Metrics(),
+            )
+        else:
+            result = audit_event(
+                arguments.repo.resolve(),
+                arguments.event_kind,
+                payload,
+                git_runner=git_runner,
+                budget_limit=arguments.budget,
+            )
         emit_json(result)
         return result["audit_exit"]
 
@@ -16592,4 +18018,4 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(git_runner=_trusted_git_runner()))

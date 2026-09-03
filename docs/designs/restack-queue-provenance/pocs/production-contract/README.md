@@ -10,10 +10,10 @@ It imports and calls the worktree's actual `queue_action_identity` and
 `queue_deletion_problem`, and `queue_mutation_problem`; it never invents
 an Action-ID or lifecycle verdict.
 
-Canonical evidence artifact: `sha256:543fa185634cabe0dfe6a2f2a3e0bd1922e14e518bab2d8e4ae14b001d184751`.
-Canonical semantic stream: `sha256:6462a15e0b22d273180b00bbe9fdd9897e17fbe5ba01c8d2916ca1ab37e48a24`.
+Canonical evidence artifact: `sha256:40db59e4e039ced600aca22c574bd21749c7c714d7ae5b4f1bef58fd8b8a3d31`.
+Canonical semantic stream: `sha256:7c31d6ff191505c0b3ab2d62f41785f8df7baedacfbca412b646c3c600f41a28`.
 The raw JSONL stream is ephemeral and has no stored hash claim.
-Evidence schemas v2 at commit `0b80c342feb310d73de6564aab2224a899f42486`, v3 at commit `7f4a1ffacd1cf8163f597daa186f801e9ce06a3a`, v4 at commit `cce76a037f1584ff7d37048cb4411bdf0f5aa907`, v5 at commit `d12b799a2fa27b05a5ee2af1b422131856296b41`, v6 at commit `9ab61c416be1911e44c6bce2b3d711b6f2abef15`, v7 at commit `820ae1a788f5b24493a4277fb4d79981e0be202f`, v8 at commit `c3793ec53c9b6aebe03b6e1b1cfa7badf3d4828a`, v9 at commit `8abc908840191185e222a29132e72630ebf73a21`, and v10 at commit `5872446ad4ed1e9940f96b6e28b8f7042fccf6d1` are superseded and burned by their later blockers; all histories are preserved, no identifier is reused, and this artifact closes `agentfold-production-contract-evidence/v11`.
+Evidence schemas v2 at commit `0b80c342feb310d73de6564aab2224a899f42486`, v3 at commit `7f4a1ffacd1cf8163f597daa186f801e9ce06a3a`, v4 at commit `cce76a037f1584ff7d37048cb4411bdf0f5aa907`, v5 at commit `d12b799a2fa27b05a5ee2af1b422131856296b41`, v6 at commit `9ab61c416be1911e44c6bce2b3d711b6f2abef15`, v7 at commit `820ae1a788f5b24493a4277fb4d79981e0be202f`, v8 at commit `c3793ec53c9b6aebe03b6e1b1cfa7badf3d4828a`, v9 at commit `8abc908840191185e222a29132e72630ebf73a21`, v10 at commit `5872446ad4ed1e9940f96b6e28b8f7042fccf6d1`, and v11 at commit `1e1b81adae4cba13d29fac221a3de6ea78612ce7` are superseded and burned by their later blockers; all histories are preserved, no identifier is reused, and this artifact closes `agentfold-production-contract-evidence/v12`.
 The execution-bound runtime landed in commits `c32f470977735a63feaf377ca9290353d1520e0e` and `850d02587f7f812b7dde9667a39da80b4ce48764`; the latter binds literal refusal at the 68th parent token.
 
 ## Contract exercised
@@ -67,27 +67,42 @@ The stable executable adapter entrypoint is
 `prototype.py --repo ROOT --event-kind KIND --event-payload EVENT.json`.
 Exits 0, 1, and 2 mean clean, blocking, and coverage-unavailable. Importers
 use `event_endpoints(event_kind, payload)` and typed-U-only
-`audit_event(root, event_kind, payload, *, budget_limit=None, transaction=None)`.
-A valid event calls the optional transaction seam once around
-the complete Git-backed audit. Its context may yield a `GitSpawnObserver`;
+`audit_event(root, event_kind, payload, *, git_runner, budget_limit=None, transaction=None)`.
+The required keyword-only `git_runner` has no default, `None`, ambient, or
+process-global fallback. There is no advertised ordinary O/N CLI and no
+selectable non-U production route.
+Each valid audit creates a private `RepositorySession` that owns its resolved
+root, metrics, observer, children, descriptors, object database and caches,
+carry-proof cache, and uniquely named reconciler module. The reconciler's
+repository roots, mutable caches, persistent readers, active transition state,
+and date are session-local; retry rendering is pinned to `2026-09-02`.
+Its closed module-local subprocess facade exposes only Git `run`/`Popen` and
+routes every imported child through the injected runner. It never patches or
+delegates to the process-global `subprocess.Popen`.
+A valid event calls the optional transaction seam once around the complete
+Git-backed audit and its resource cleanup. Its context may yield a `GitSpawnObserver`;
 production calls `before_spawn(exact_command)` before creating every Git
 child and `after_spawn(exact_command, pid)` afterward. Thus an external
 evaluator precharges every attempt while `git_processes` counts only children
-actually created and delivered to `after_spawn`; a failed factory therefore
-records one monotonic attempt and zero children. Callback throwables clean up
+actually created and delivered to `after_spawn`. Factory/entry failures create
+no attempts; launch or callback throwables retain exact attempt/actual/before/after
+counts. Callback throwables clean up
 the child before returning unreadable or re-raising cancellation, and attach a
-stable cleanup-failure note if cancellation cleanup cannot be proven. The trusted
-spawn primitive ignores and cannot re-enter through ambient Popen wrappers.
-A process-local nonblocking single-flight gate covers the transaction, imported
-reconciler globals, compatibility Popen wrapper, cleanup, metric snapshot, and
-exact restoration. Concurrent and same-thread nested valid calls return typed
-`audit-busy` with zero transaction entries, attempts, children, or callbacks;
-invalid input refuses before this gate. The compatibility wrapper charges only
-its invocation token, so unrelated threads delegate to the saved ambient factory.
-Exact restoration assumes every process-global Popen writer participates. This is
-a legacy-helper POC boundary, not the final architecture: Strategy A production
-code must inject a required keyword-only trusted Git runner and give each audit a
-private RepositorySession, with no ambient or default runner fallback. The caller receives neither
+stable cleanup-failure note if cancellation cleanup cannot be proven. Session
+cleanup finishes while the transaction remains active; `__exit__` is called once
+after cleanup, cannot suppress the audit result, and final metrics are taken after
+exit. Non-cancellation factory/enter/exit failures are typed unreadable, while
+cancellation is deferred until independent cleanup and the permitted exit call finish.
+Deterministic cancellation at the first line after reconciler load, after the
+session ContextVar changes, after the runner result is published, after its local
+binding, after pipe attachment,
+after transaction entry, and before transaction exit leaves no private module,
+child, or descriptor behind. The caller context manager is entered and exited
+directly; no Python wrapper adds a delegate-entry or delegate-exit gap.
+Concurrent and nested sessions, including duplicate prototype imports sharing one
+immutable runner, remain isolated for the same or different repository roots; all
+private module names are removed on cleanup and ambient Popen identity is unchanged.
+The caller receives neither
 the operation nor its result, so O/N, Strategy U, and classification remain
 owned by the audit. Local, pre-push, push, and PR
 synchronize each run a real non-fast-forward clean restack and genuine blocking
@@ -163,31 +178,45 @@ the same forged file is both `--stream` and `--compare`; all six pre-generation
 damage probes preserve output sentinels. Both output files and their old backups
 are staged and fsynced before a canonical same-directory recovery journal is
 published and directory-fsynced. A directory-inode lock serializes publishers;
-a concurrent publisher refuses before staging. An ordinary late failure restores
+a concurrent publisher refuses before staging. Cancellation immediately after
+the directory fd is published or immediately before close releases the lock, and
+a following publisher reacquires it. An ordinary late failure restores
 the old pair. If that recovery also persistently fails, the journal and verified
 regular-file backups remain, every invocation refuses or restores the old pair
 before generating, and a later successful invocation recovers deterministically.
 Forged traversal names, malformed digests, symlink journals/backups, and symlink
-targets are never accepted as recovery authority. Before any new staging or journal
-creation, both existing targets must pass `lstat` as non-symlink regular files and
-a bounded no-follow read of at most 16777216 bytes; FIFO, device, directory,
-symlink, race-changed, and oversized targets refuse without touching the other target.
+targets are never accepted as recovery authority. One bounded descriptor reader
+uses required `O_NONBLOCK|O_NOFOLLOW|O_CLOEXEC`, compares lstat/pre-fstat/post-fstat
+type, device, inode, size, mtime_ns, and ctime_ns, and reads no more than limit+1
+bytes. Artifacts/backups use a 16777216-byte cap; journals use
+the separate 8192-byte cap. Exact-limit files pass; plus-one, FIFO, device,
+directory, symlink, lstat/open replacement, growth, shrinkage, and same-inode/same-size
+mutation refuse. Bytes become visible only after the one raw descriptor close succeeds.
+Recovery stages verified backup bytes to a distinct restore file, preserves the sole
+backup until the restored target validates, and validates both newly published targets
+against intended bytes before deleting the journal.
 Portable filesystems still
 cannot atomically exchange two paths: a process or machine crash may expose a
 temporary mixed namespace, but the fsynced journal keeps it non-authoritative and
 recoverable on the next invocation. This does not claim atomic pair visibility or
-survival of storage loss/corruption beyond the filesystem's fsync guarantees.
+survival of storage loss/corruption beyond the filesystem's fsync guarantees. The
+lock pins and serializes one directory inode, but pathname operations are not yet
+dirfd-relative; hostile replacement of the parent directory during publication is
+explicitly outside this POC's claim.
 
-Every production `PIPE` is created explicitly with one raw parent-fd ownership
-token before Popen and exposed through a non-owning Python view. Cleanup consumes
-OPEN to RETIRING exactly once, makes one raw close attempt, and ends CLOSED or
-UNKNOWN; it never re-queries a wrapper or retries an unknown token, so later fd
+Every production `PIPE` pair is published into a construction registry before
+Python regains control, converted to one raw parent-fd ownership token before
+Popen, and exposed through a non-owning Python view. Immediately before
+the sole raw close call, cleanup tombstones the numeric descriptor and changes OPEN
+to durable UNKNOWN; only a normal return upgrades it to CLOSED. Every throwable is
+therefore ambiguous and fail-closed; cleanup never retries an UNKNOWN token, so later fd
 reuse cannot be closed by a stale object. The object database closes stdin and
 stdout on success, abort, an already-exited child, and a stubborn child that
-requires timeout then kill. If an object wrapper raises before closing, the raw owned
-descriptor is closed, but the audit still returns unreadable. A
-wrapper that closes first and then throws is also propagated after verified
-cleanup; cancellation is never swallowed. An
+requires timeout then kill. Public process replacements and mutations of the
+non-owning view are never granted a close callback; cleanup uses its immutable
+closefd-false backing reference only after the raw token is consumed. A raw closer
+that closes first and then throws is propagated as UNKNOWN, never claimed as
+verified cleanup; cancellation is never swallowed. An
 unclosable descriptor likewise fails closed with no action. Even an unproved
 post-kill reap closes both descriptors and returns unreadable without recording
 a false reap. Repeated close or abort is idempotent, and published metrics are
@@ -213,7 +242,7 @@ The 64-parent outside-C octopus exits 2 transactionally and is record-bound by `
 The P22 pre-charge case stops exactly at `object_reads=134>133`, keeps Git processes at 4, freezes later counters, and is record-bound by `sha256:d7102979bd1f64c2d1e5d873b692b73d200f2e4cae24fafa37318c0ed689ced7`; its post-hoc damage reproduces the prior 10,973-snapshot/24,736-cache-hit full run.
 Ten runtime exact/+1 pairs bind streaming graph bytes/lines/tokens, object payloads, flattened trees, dynamic support traversal, certificate serialization, origin-arm nodes/parent edges, and canonical birth-witness bytes. Every +1 refusal exits 2 with zero partial results; graph reads peak at 256 bytes per chunk and publish nothing on refusal. P22 separately observes exactly 129 imported production parent queries, 135 Git spawn attempts, and 135 actual Git children.
 Unreadable Git objects use the stable typed reason `missing-or-malformed-commit:b5fcd8d0260da07b741462af3e3e2b49b546d600`. Every Git child is forced to C locale and UTC; the stable C/French results are equal even though the independent ambient diagnostic streams differ.
-Before any projection or digest, all 273 raw rows must match the static recursive key/list/type grammar catalog `sha256:08c3cf10f4404aa957029227b74f6a6285f649d4fb74e0af3cdd2f9ba8ea05fb`; an unknown top-level or nested field exits 1.
+Before any projection or digest, all 273 raw rows must match the static recursive key/list/type grammar catalog `sha256:cc668580b07563929d4fcb1a133fc23b839d89d9f65e59f8a85344b1d61a7219`; an unknown top-level or nested field exits 1.
 The parent-order pair has identical verdicts and the same role multiset:
 `['compatible-carrier', 'source']`. The four persisted parent-order pairs and the origin-birth parent-order pair are also equal by semantic signature.
 
@@ -281,8 +310,8 @@ Wide-boundary budget reference OIDs (bound review input):
 |---|---:|---|
 | `docs/AGENTS.md` | 675 | `sha256:5342de9cada318428ea9b091e2434ad4d1e19e173a87295fe978651dc1a04b14` |
 | `docs/designs/AGENTS.md` | 709 | `sha256:0e8c04dea40750971f0a567e84dd33ae5529960629abee9323234046105649e8` |
-| `docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py` | 308388 | `sha256:072aa85a0883e8443d0a2f3aa529108f08559ea8d49006f7b39433732fdef95e` |
-| `docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py` | 607150 | `sha256:84a2fd0ee5ba98f590f189a579cf74f05d86eec1fa24801860113e7e21ab6c3c` |
+| `docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py` | 350203 | `sha256:c30913829d962280269faf2a2aca85338304f5e3c95899064828f7bf60ec693d` |
+| `docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py` | 658680 | `sha256:123637aebc88f18e04ea41958bfdbc0edb03d7557d746c378769a794ab6a3b71` |
 | `automation/check_action_projection.py` | 123062 | `sha256:bd9f73b79b3fac94f36d8248b4ce23c6fa7826da45d562a85bd9b1e14255e0c1` |
 | `automation/markdown_semantics.py` | 33735 | `sha256:a5f58a99e739af4e3e61109caa880cb68dc739d93c727b74b8e2456220641c63` |
 | `automation/reconcile/reconcile.py` | 499357 | `sha256:0436489bf3bb9a52ff80e6e36962393413d626d034b029e938876f4ddd84c0b7` |
@@ -349,7 +378,7 @@ carry proofs, and workflow input contracts. It is not an OID-pool membership che
 | `PCX-12-timing-rename-supplier` | `c81cd1ddc4c58f7e6d5b9bd7f0a626f972651c79` | `e89ed03c9f3c8d338d6b4f03dfee7d6994ce400e` | `97ae732aab6ceb15bba65fdc775f3b4d5115a3a2` | 0 | `no-finding` | `valid` | `supplier` | 1/1/1/1 | `PASS` | `sha256:f8f851385ae6b3f12cfea993a6079fe761296fe9bf799359610a34b4000d3149` |
 | `PCX-13-conflicting-human-response` | `58e15401aaba3e6f056f7dbaf6789c10d35ae553` | `1e790e17e8d0ba21ab1a7213d6e0e0fa2d12f047` | `14707f668aecd10bb531aa6fa0ec57700d26844b` | 1 | `blocking-finding` | `invalid` | `supplier` | 1/3/1/1 | `PASS` | `sha256:2bceeddee39e357685285810f2361b7a4b4431f36880c1278e714b18e02837df` |
 | `PCX-14-valid-human-supplier` | `920e716ffd62703b03e21acd40423d34d60f165d` | `15ab9f04625ca7c4d6a8847bebaaa2b3169b5b69` | `36eaf058713764ea31d22a9cc74f800aaefbed1d` | 0 | `no-finding` | `valid` | `supplier` | 1/1/1/1 | `PASS` | `sha256:5c8c2b9a01df10f8d6fc9bbab3e08ecbf52a696c11946dfab38b43fc84872ddf` |
-| `PCX-15-generated-retry-supplier` | `03cab3c249ed96db646bda0085596770b15f5801` | `44457ccb883890f47979a0504d52f5da066af287` | `338762e488c1ce489527bb173d9f8e2262c5f4c8` | 0 | `no-finding` | `valid` | `supplier` | 1/1/7/1 | `PASS` | `sha256:702f106ebe34274a3ff6db8a13422047607dc2fc89339b66da7f19feb8d78fef` |
+| `PCX-15-generated-retry-supplier` | `03cab3c249ed96db646bda0085596770b15f5801` | `44457ccb883890f47979a0504d52f5da066af287` | `338762e488c1ce489527bb173d9f8e2262c5f4c8` | 0 | `no-finding` | `valid` | `supplier` | 1/1/7/1 | `PASS` | `sha256:2ad389d7ff619962d558c4eca8e9f15a5c856bf2f2c934d3fb9915b285e03bc8` |
 | `PCX-16-task-pickup-supplier` | `ab3f73cb72be2389d566fb06118bc841facffc86` | `be2b18037fbd9785128edb1af215d459b7be8b9c` | `fcf1b089a8cf59a77e3d1740409e12b12815f7fc` | 0 | `no-finding` | `valid` | `supplier` | 1/1/1/1 | `PASS` | `sha256:a77da844d11832cd4ad529aa7ed02ebddee75716cdafd12f23061cf15ad2d3f4` |
 | `PCX-17-complete-cherry-pick` | `33db81167dcecdaa77e3c6e97ea6305b99d13346` | `8385f0c8c1094932a794ebb94b32b4d872806cd2` | `855eaa3b813900caaa0e523baa198491cb4bc47b` | 0 | `no-finding` | `valid` | `direct` | 1/0/1/0 | `PASS` | `sha256:3d14d7eae584563d182adc04df0b68f3126c34fd0b691cede3657317ed8f2758` |
 | `PCX-17-deletion-only-cherry-pick` | `56008eecc6492c2c091a516834d675e283cc40bd` | `35b9163866f1c9cf6ab2435eeba3abfc0b9fd1fa` | `5da95440d2c9065d8b6f4506d2108a3f97bed539` | 1 | `blocking-finding` | `invalid` | `direct` | 1/0/1/0 | `PASS` | `sha256:1dd83f820d14a8f888b02abd64090940d12f751478fe041acbd9b2d72d326f5f` |
@@ -555,7 +584,7 @@ A/P/U/S means authority, propagation, persisted mutation, and supplier-support c
 | `broad-review-pending-normalization` | `fe50d93da4de5ba4e924562e499d68c3dfe93118` | `1f06d5a4de78cd24f1f97cd617c10ab79bbf5487` | `ba4edb8f323adba9645e47c2536f2b621bed7855` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:292e6c32afeb9ca638d3bad9cd4a9596302eee6456662ce51f51bf84a31df86d` |
 | `buffered-graph-output` | `c2080829aec4e8ae17a17e29fd823b80e74d99d0` | `a2659af5918566489ae4ea08c86925a0b276ad90` | `0f42c9312d8a41d51c1e17d3776a6ec5a8e657e2` | `blocking-finding` | `blocking-finding` | `OBSERVED_RED` | `sha256:4076adca6645e7afdbbc0cd09df9cfdf73c8396d8a6f9475346170a5608ad5d0` |
 | `endpoint-only-origin-equality` | `470a8cb8473e6cd5336a87220feaacb3e2ec53e0` | `4a58c18ccdc13f072d74f6b134ad76b98f28463c` | `6a39f8fd46eccd075abe13037b8ab08311fbbdd5` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:c4e33f3dab8b3dc1ad85cf9cb33ceea7717c5017d1ca85ce2cedb4aa6f3caa4e` |
-| `event-adapter-cli-entrypoint` | `0000000000000000000000000000000000000000` | `0000000000000000000000000000000000000000` | `0000000000000000000000000000000000000000` | `three-exit-adapter-contract` | `metadata-only-workflow-fixture` | `OBSERVED_RED` | `sha256:7529d686ee6cb0326d65f13dce3b982320202d6943591dc6ee82fc1f9c9ffd3d` |
+| `event-adapter-cli-entrypoint` | `0000000000000000000000000000000000000000` | `0000000000000000000000000000000000000000` | `0000000000000000000000000000000000000000` | `three-exit-adapter-contract` | `ambient-or-shared-session-boundary` | `OBSERVED_RED` | `sha256:ef198b3e836b4d68df5067c20c8756cddee8129f92eb69efb26dec8f18dbf0da` |
 | `first-parent-carry-proof` | `bb60281870ffd7279e90c3fdb11326b1759a64f3` | `20417860a7a086bb0f2a171db425ac97f43c5269` | `d9fb9b1c536e2ef615e7ed902c697ebe84f27793` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:8c6b273cd04dcb4b4d17e60a3c3913f929ff3342d72b92ccfacd964f07d8f74e` |
 | `identity-multiplicity-collapsed-to-set` | `bc6aa9f19ca8f454518b57c31d776631febc8cc1` | `7dfc74cea7ca951a4a21f28ef492e36f3fff17e6` | `21f67ef2f92ee4ee90ffd14a7e531e5f33f281cc` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:7e6e7b7646ca1bcd1821ef3fd920528858c6a8e435eb04b5ff975ff4ebd20ccc` |
 | `ignore-absent-C-arm` | `a3cbba79bd52df83262715df9652f338ed3b7f5f` | `a6a471c1129d9af27fd96ae12ec4bee2d2f326e5` | `a5e82a41d59db68164823c9fb5a58359bcf1ec49` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:f9a91f587c7790cdfdcd77cd3f389ea8fe9a54a4a27ce0f51af4d4809e75e3a4` |
@@ -563,7 +592,7 @@ A/P/U/S means authority, propagation, persisted mutation, and supplier-support c
 | `ignore-outside-C-carrier` | `446a8c37bb272b847634d4f51ed29d6bdf9db1a5` | `5f2c5d5e1489b14b10120ff854459b2e71944fd1` | `60e0f415b3d0d3c59e0a7980c4efbc9868e1d576` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:3b56c222946112d1313e27f2259fa322b9f6715328bcbc5a67038eccb63181a8` |
 | `ignore-persisted-absent-C-arm` | `be75a50c3ceea41059aa954effb358348455b9d7` | `1f0d7b897a4a09e5c8273ddcd4fb25ef7a69f656` | `501cc5ef6cb38be7a83d37b9f47d26cf2acebdec` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:b5a60b9898d9fabd6d22870af82214ea6692dc94c68f297735bc18d994a3e4ff` |
 | `ignore-persisted-outside-C-collision` | `f87a6d73b61852cb9487b0f1ebf6febd0e72c35c` | `6062aa2350b2611b66c70feda73ec2f005a969ab` | `32a88f55e904d1892fd473b62f3d30a4bf2faf24` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:db79757d9c07fd27faa50b16aad799d190bc584e23a910badd7c2aed36f19100` |
-| `leak-object-database-pipes` | `0000000000000000000000000000000000000000` | `0000000000000000000000000000000000000000` | `0000000000000000000000000000000000000000` | `closed-descriptors` | `leaked-descriptors` | `OBSERVED_RED` | `sha256:d9dc0e0224cdb23474e7bd5bd2197b6441d96ede5e713d7351503abaeeb231e3` |
+| `leak-object-database-pipes` | `0000000000000000000000000000000000000000` | `0000000000000000000000000000000000000000` | `0000000000000000000000000000000000000000` | `closed-descriptors` | `leaked-descriptors` | `OBSERVED_RED` | `sha256:20044b448140a57d50da0e36f3ef823d819205a28644808f55a0492749cebe65` |
 | `literal-review-pending-treated-concrete` | `7a613196cb22eb565e0f85194f7e2b8251a1484e` | `4263506464cbffb20b5f550fa142ebd391669ca1` | `8f2d8945b9ee6ffc11a714efefad9f8c1d708410` | `no-finding` | `blocking-finding` | `OBSERVED_RED` | `sha256:13d112385cf15c651e998e536dc1094018aa7eed5bcb3a8e7462bcbbbda7a5eb` |
 | `locale-git-error-stream-equality` | `None` | `42b178114baa052d7ee7ffb1c8814a8d916b7911` | `19fbc24144d0298bca24978ad439e9deb1c7fd87` | `unreadable` | `unreadable` | `OBSERVED_RED` | `sha256:5c034618ea0b830c69aa5591031431f90a390b243a064353150941fb215c4cf9` |
 | `missing-all-parent-direct-validation` | `d7dc739a275601572c26fadc522a2ae4b71d3b12` | `ff1d9fce8cf6d941f7e0210a9cc6b3380df94741` | `bd005f27951b3bae6225e8cc736936db93667388` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:a71ef07baa481ad097d61471eb45665ceb58881ef0384a019692ee0ce15b4493` |
@@ -586,7 +615,7 @@ A/P/U/S means authority, propagation, persisted mutation, and supplier-support c
 | `skip-preserved-state-validation` | `5604e77ef241630dd284448a224de046d2caf460` | `49974b53d2f24076e2ad9eb183ee4e1511ad69e5` | `8702850ba2e7f56c29b16557c496adcaa627829b` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:24c70098bf6f1ac8767098bddbd3a29314b6564ca96b3a8e10349b51bbdc5bf6` |
 | `skip-supplier-support-certificate` | `96de2cbd6d1afee44ffb6a03dcd12ea53ade9d70` | `fdd6aafdea7adfb0255ef9c1cf12168a23685d00` | `c24c0ed6dd25307717255c297879a96ee8c40f7c` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:d1b258a1c702f816d164f26803f921934c2eb2c94f103ac281f1e9a16401c1f3` |
 | `sole-valid-ignores-invalid-root` | `566072d117ff7a1e4309949f6a885bd8e26d65d2` | `5dc5378fdc316aa30dce282d0388a438d755b067` | `abe68c6bcfb89b4194e7d9f3ace08a58e985a450` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:abe626b443dd6abfc3904501eb9a699340e2377c88e2e62540220fce7a8e0260` |
-| `stream-malformed-truncated-final-line` | `0000000000000000000000000000000000000000` | `0000000000000000000000000000000000000000` | `0000000000000000000000000000000000000000` | `unreadable` | `partial-graph` | `OBSERVED_RED` | `sha256:b55f83bc15c0714c3b44a42473a21ea5343fe205359d81067a08b14c751a2f45` |
+| `stream-malformed-truncated-final-line` | `0000000000000000000000000000000000000000` | `0000000000000000000000000000000000000000` | `0000000000000000000000000000000000000000` | `unreadable` | `partial-graph` | `OBSERVED_RED` | `sha256:aba7670b099f934d10428ca9fe8e7753c3ae65888527b5275e4f0f1fb3b2517d` |
 | `supplier-authority-borrowing` | `8d565f19c072aa8f0cef381b3f0e8fc58029820f` | `41865c9def0f066b1d121b9882872ecf33bfe729` | `8579708e09425d6c4e09b9260991148f8ef3ed6b` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:bd0477934aca03ca18ec5300fa3db3dc5bbf310cffa7086a8776de47f5d55e74` |
 | `unmetered-cone-work` | `c2080829aec4e8ae17a17e29fd823b80e74d99d0` | `a2659af5918566489ae4ea08c86925a0b276ad90` | `0f42c9312d8a41d51c1e17d3776a6ec5a8e657e2` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:ea953cb9245f335c1cd2072547c6b5dd1dfe9e20a81dca51eca277d874d4e03a` |
 | `unmetered-dynamic-support` | `ab3f73cb72be2389d566fb06118bc841facffc86` | `be2b18037fbd9785128edb1af215d459b7be8b9c` | `fcf1b089a8cf59a77e3d1740409e12b12815f7fc` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:bbcb82db16c13abaf88b2d0a0afc2aa345235c7926a1add086de0f8090fecc4e` |
@@ -610,12 +639,12 @@ PCX-19 is replay-bound by `sha256:95812f65a03b9717a9455f1dcaefdeb68fa4b4d738cc8e
 Use two fresh, empty scratch roots:
 
 ```sh
-PYTHONHASHSEED=1 LC_ALL=C LANG=C TZ=UTC PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-r22-v11-seed1 > /tmp/production-contract-r22-v11-seed1.jsonl
-PYTHONHASHSEED=777 LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 TZ=America/Los_Angeles PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --reverse-construction --fixtures-dir /tmp/production-contract-r22-v11-seed777 > /tmp/production-contract-r22-v11-seed777.jsonl
-python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r22-v11-seed1.jsonl --compare /tmp/production-contract-r22-v11-seed777.jsonl
-python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r22-v11-seed1.jsonl --damage-test
-python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r22-v11-seed1.jsonl --generate
-python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --repo /path/to/repo --old FULL_OID_O --new FULL_OID_N --origin-strategy U
+PYTHONHASHSEED=1 LC_ALL=C LANG=C TZ=UTC PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-r25-v12-seed1 > /tmp/production-contract-r25-v12-seed1.jsonl
+PYTHONHASHSEED=777 LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 TZ=America/Los_Angeles PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --reverse-construction --fixtures-dir /tmp/production-contract-r25-v12-seed777 > /tmp/production-contract-r25-v12-seed777.jsonl
+python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r25-v12-seed1.jsonl --compare /tmp/production-contract-r25-v12-seed777.jsonl
+python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r25-v12-seed1.jsonl --damage-test
+python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r25-v12-seed1.jsonl --compare /tmp/production-contract-r25-v12-seed777.jsonl --generate
+python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --repo /path/to/repo --event-kind push --event-payload /path/to/event.json
 python3 -m py_compile docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py
 python3 automation/run_tests.py
 python3 automation/reconcile/reconcile.py --check
@@ -642,6 +671,8 @@ noncanonical ordering, BOM, CRLF, and missing newline.
 - Certificates intentionally overbind non-action authority delta and referenced paths until production exposes a validator-owned support receipt.
 - Review successor/reask and boundary-review supplier leaves fail closed rather than simulate semantics.
 - The one-pass claim excludes imported production parent queries; production integration must cache/eliminate them.
+- Uncatchable process termination and native failure inside a resource-creating syscall are outside this Python POC; Python-level `KeyboardInterrupt`/`SystemExit` after resource return is covered by pre-bytecode ownership publication.
+- Hostile replacement of the artifact parent directory inode during publication is excluded until every pathname operation is dirfd-relative.
 - PCX-21/22 remain production-integration gates, not isolated-POC completion claims.
 
 ## Tests not represented by this artifact

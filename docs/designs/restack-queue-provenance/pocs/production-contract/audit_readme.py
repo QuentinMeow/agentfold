@@ -12,9 +12,12 @@ from __future__ import annotations
 import argparse
 import contextlib
 import copy
+import errno
 import fcntl
+import functools
 import hashlib
 import json
+import operator
 import os
 from pathlib import Path
 import stat
@@ -24,7 +27,7 @@ import tempfile
 from typing import Any
 
 
-SCHEMA = "agentfold-production-contract-evidence/v11"
+SCHEMA = "agentfold-production-contract-evidence/v12"
 SUPERSEDED_EVIDENCE = {
     "artifacts": [
         {
@@ -110,6 +113,16 @@ SUPERSEDED_EVIDENCE = {
                 "and v10 is never reused"
             ),
             "schema": "agentfold-production-contract-evidence/v10",
+        },
+        {
+            "commit": "1e1b81adae4cba13d29fac221a3de6ea78612ce7",
+            "disposition": (
+                "superseded and burned after duplicate-module session, "
+                "construction-close ambiguity, live-date replay, and "
+                "single-descriptor journal/artifact race blockers; history "
+                "is preserved and v11 is never reused"
+            ),
+            "schema": "agentfold-production-contract-evidence/v11",
         },
     ],
     "replacement_schema": SCHEMA,
@@ -725,9 +738,9 @@ FIXTURE_CLAIMS = (
 )
 
 
-# Generated from a byte-identical forward/reverse v11 pair. Every row kind has
+# Generated from a byte-identical forward/reverse v12 pair. Every row kind has
 # one exact recursive shape digest, checked before any projection.
-RAW_SHAPE_CATALOG_V11 = """
+RAW_SHAPE_CATALOG_V12 = """
 scenario:P1-direct-linear-valid sha256:3f69e6eb45b0e39682e27340f52f906139997a9ddcde927478e17a9239b6d8e4
 scenario:P10-direct-invalid-parent sha256:b188bdde0c472555a55ccba6a06e6c5dd562240bb94d5056aad98d6405595122
 scenario:P11-direct-three-parent-valid sha256:15b54ce5edfc83f16f307df8bba037da1cb471246757eb9ad33f93e8dd8cc001
@@ -770,7 +783,7 @@ scenario:PCX-11-different-payload-same-path sha256:a9478143128bd39525f2874293fb6
 scenario:PCX-12-timing-rename-supplier sha256:e6a0b4295f5d500d35364227072155c9e0521306e346ffe2da0fef68b0519a35
 scenario:PCX-13-conflicting-human-response sha256:ab4f193c8702ab6f27a8829afd2386ed6c6aee545a09aebf3cdc324401a2fe45
 scenario:PCX-14-valid-human-supplier sha256:a91e2209c7671f6385ff8b2714ee2d0f3296f7e4f816c0402b0b8c9f8501f0d9
-scenario:PCX-15-generated-retry-supplier sha256:ef71c41daacd89d43402ceacd93cb5bcc80eda625bed4224bd3059c350ff6c09
+scenario:PCX-15-generated-retry-supplier sha256:1de5f83af467772c545840e32eba80da4fd881f6c130041d791a47a258ed332e
 scenario:PCX-16-task-pickup-supplier sha256:a7a058bfd19c10048bee5a2212cbe03b7d8f0614c8f391ad7dda658b11a24bde
 scenario:PCX-17-complete-cherry-pick sha256:0db4896b882ec810042deaf693f8417c9bcb8c9441764bae5518d656a512e1eb
 scenario:PCX-17-deletion-only-cherry-pick sha256:dc5b7e2ba67e0aaa9a68d72ac865d4288cf5a51cbaefe76c910eff001a219592
@@ -962,7 +975,7 @@ aliases sha256:539a8708aebdaa2816ceb01ed2e091a849972b69700c444eeec8e566eaa9eed3
 control:broad-review-pending-normalization sha256:4d55407e4a51e86c40626e007d59ef9c33330a0f865fa8eee3fc5e490525b414
 control:buffered-graph-output sha256:a5c9687fc28f115ffb25a46739950c0bff58f1297ed55d7d953845957b91b5d5
 control:endpoint-only-origin-equality sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
-control:event-adapter-cli-entrypoint sha256:6d0b3d788ab46e946a5e371bb6056ff3f7094b4d7a5acecc7f63e9c998c98b65
+control:event-adapter-cli-entrypoint sha256:5425bf284ce4233e9e53dfcc59baa477f2be1b321fc718edff553d1a4b1aa776
 control:first-parent-carry-proof sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
 control:identity-multiplicity-collapsed-to-set sha256:1ac1b79c19942df728cefbeb0153aeb8b42f07ceffc5343fd5981b03e6048190
 control:ignore-absent-C-arm sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
@@ -970,7 +983,7 @@ control:ignore-invalid-N-root sha256:e6d8aa17fd995baf10e03163e020ab50afb5e1b5bfc
 control:ignore-outside-C-carrier sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
 control:ignore-persisted-absent-C-arm sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
 control:ignore-persisted-outside-C-collision sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
-control:leak-object-database-pipes sha256:1804c2e6415a8699ce096bb4e2e25b0add910799cd4350cf266be4037df2b72e
+control:leak-object-database-pipes sha256:eb14c3a1780702a8a7977554588cab2c9fb7e6231aba19297700dc031c1b5691
 control:literal-review-pending-treated-concrete sha256:4d55407e4a51e86c40626e007d59ef9c33330a0f865fa8eee3fc5e490525b414
 control:locale-git-error-stream-equality sha256:742dda0d750851fe1eaf99a187460279385d12aadb25de6479979cbea272c8e4
 control:missing-all-parent-direct-validation sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
@@ -1004,7 +1017,7 @@ summary sha256:b957b61b2a27224040772a4629d78ad28a6877450d639808664ac078929a351e
 """
 RAW_SHAPE_SHA256 = dict(
     line.split(" ", 1)
-    for line in RAW_SHAPE_CATALOG_V11.splitlines()
+    for line in RAW_SHAPE_CATALOG_V12.splitlines()
     if " " in line
 )
 
@@ -1576,80 +1589,336 @@ def require_fresh_replay(
 
 
 MAX_EXISTING_ARTIFACT_BYTES = 16 * 1024 * 1024
+MAX_PAIR_JOURNAL_BYTES = 8 * 1024
 
 
-def read_existing_artifact_bounded(
-    target: Path, label: str
-) -> tuple[bytes, int] | None:
-    """Read one prior artifact without following or blocking on special files."""
+def publish_call_result(target: list, callback) -> None:
+    """Append a returned resource before control reaches Python bytecode."""
+    tuple(map(target.append, map(operator.call, (callback,))))
+
+
+class PublishedDescriptor:
+    """One raw fd published before Python resumes after its factory call."""
+
+    def __init__(self):
+        self._slot: list[int] = []
+
+    @property
+    def descriptor(self) -> int:
+        if len(self._slot) != 1:
+            raise EvidenceError("descriptor ownership is not open")
+        return self._slot[0]
+
+    def acquire(self, callback) -> int:
+        if self._slot:
+            raise EvidenceError("descriptor ownership is already open")
+        # Both map iterators and tuple consumption execute in C.  The returned
+        # fd is appended to the pre-existing slot before Python can observe a
+        # post-CALL/pre-STORE_FAST cancellation boundary.
+        publish_call_result(self._slot, callback)
+        return self.descriptor
+
+    def close(self) -> None:
+        descriptor = self.descriptor
+        # Clear the only retryable token and invoke close in one C-consumed
+        # callback sequence.  A normal return is closed; any throwable is
+        # ambiguous and the numeric fd is never retried after possible reuse.
+        operations = (
+            functools.partial(self._slot.clear),
+            functools.partial(os.close, descriptor),
+        )
+        tuple(map(operator.call, operations))
+
+    def __del__(self):
+        # Last-resort cleanup if cancellation interrupts a caller before it
+        # enters its explicit close block.  Explicit close always consumes the
+        # slot first, so this cannot retry an ambiguous numeric descriptor.
+        if not self._slot:
+            return
+        try:
+            descriptor = self._slot[0]
+            operations = (
+                functools.partial(self._slot.clear),
+                functools.partial(os.close, descriptor),
+            )
+            tuple(map(operator.call, operations))
+        except BaseException:
+            pass
+
+
+class PublishedTemporaryFile:
+    """One mkstemp result published before Python resumes after creation."""
+
+    def __init__(self):
+        self._slot: list[tuple[int, str]] = []
+
+    @property
+    def resource(self) -> tuple[int, str]:
+        if len(self._slot) != 1:
+            raise EvidenceError("temporary-file ownership is not open")
+        value = self._slot[0]
+        if (
+            not isinstance(value, tuple)
+            or len(value) != 2
+            or type(value[0]) is not int
+            or type(value[1]) is not str
+        ):
+            raise EvidenceError("temporary-file factory returned an invalid resource")
+        return value
+
+    @property
+    def descriptor(self) -> int:
+        return self.resource[0]
+
+    @property
+    def raw_path(self) -> str:
+        return self.resource[1]
+
+    def acquire(self, callback) -> tuple[int, str]:
+        if self._slot:
+            raise EvidenceError("temporary-file ownership is already open")
+        publish_call_result(self._slot, callback)
+        return self.resource
+
+    def close(self) -> None:
+        descriptor = self.descriptor
+        operations = (
+            functools.partial(self._slot.clear),
+            functools.partial(os.close, descriptor),
+        )
+        tuple(map(operator.call, operations))
+
+    def __del__(self):
+        if not self._slot:
+            return
+        try:
+            descriptor = self.descriptor
+            operations = (
+                functools.partial(self._slot.clear),
+                functools.partial(os.close, descriptor),
+            )
+            tuple(map(operator.call, operations))
+        except BaseException:
+            pass
+
+
+def read_bounded_regular(
+    target: Path,
+    label: str,
+    limit: int,
+    missing_ok: bool,
+    *,
+    checkpoint=None,
+) -> tuple[bytes, int, dict[str, int]] | None:
+    """Read one stable regular-file identity through one bounded descriptor."""
+    required_flags = ("O_NONBLOCK", "O_NOFOLLOW", "O_CLOEXEC")
+    if any(
+        not hasattr(os, flag) or getattr(os, flag) == 0
+        for flag in required_flags
+    ):
+        raise EvidenceError(
+            f"{label} requires O_NONBLOCK, O_NOFOLLOW, and O_CLOEXEC"
+        )
+    if type(limit) is not int or limit < 0:
+        raise EvidenceError(f"{label} has an invalid byte bound")
+
+    def notify(stage, descriptor=None):
+        if checkpoint is not None:
+            checkpoint(stage, target, descriptor)
+
+    def fingerprint(value):
+        return {
+            "mode": value.st_mode,
+            "dev": value.st_dev,
+            "ino": value.st_ino,
+            "size": value.st_size,
+            "mtime_ns": value.st_mtime_ns,
+            "ctime_ns": value.st_ctime_ns,
+        }
+
     try:
         observed = target.lstat()
     except FileNotFoundError:
-        return None
+        if missing_ok:
+            return None
+        raise EvidenceError(f"{label} is missing")
     except OSError as error:
         raise EvidenceError(f"{label} is unavailable: {error}") from error
+    notify("after-lstat")
     if not stat.S_ISREG(observed.st_mode):
+        raise EvidenceError(f"{label} must be a non-symlink regular file")
+    if observed.st_size > limit:
         raise EvidenceError(
-            f"{label} must be a non-symlink regular file"
+            f"{label} exceeds the {limit}-byte bound"
         )
-    if observed.st_size > MAX_EXISTING_ARTIFACT_BYTES:
-        raise EvidenceError(
-            f"{label} exceeds the {MAX_EXISTING_ARTIFACT_BYTES}-byte bound"
-        )
-    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
-    flags |= getattr(os, "O_NOFOLLOW", 0)
+    flags = (
+        os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC
+    )
+    ownership = PublishedDescriptor()
+    primary_error = None
+    result = None
     try:
-        descriptor = os.open(target, flags)
-    except OSError as error:
-        raise EvidenceError(f"{label} could not be opened safely: {error}") from error
-    try:
-        current = os.fstat(descriptor)
-        if (
-            not stat.S_ISREG(current.st_mode)
-            or current.st_dev != observed.st_dev
-            or current.st_ino != observed.st_ino
-            or current.st_size != observed.st_size
-            or current.st_size > MAX_EXISTING_ARTIFACT_BYTES
-        ):
+        try:
+            descriptor = ownership.acquire(
+                functools.partial(os.open, target, flags)
+            )
+        except OSError as error:
+            raise EvidenceError(
+                f"{label} could not be opened safely: {error}"
+            ) from error
+        notify("after-open", descriptor)
+        before = os.fstat(descriptor)
+        notify("after-pre-fstat", descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise EvidenceError(f"{label} must be a non-symlink regular file")
+        if fingerprint(before) != fingerprint(observed):
             raise EvidenceError(f"{label} changed during bounded validation")
+        if before.st_size > limit:
+            raise EvidenceError(f"{label} exceeds the {limit}-byte bound")
         chunks = []
-        remaining = MAX_EXISTING_ARTIFACT_BYTES + 1
+        remaining = limit + 1
+        first_chunk = True
         while remaining:
-            chunk = os.read(descriptor, min(1024 * 1024, remaining))
+            try:
+                chunk = os.read(
+                    descriptor, min(1024 * 1024, remaining)
+                )
+            except BlockingIOError as error:
+                raise EvidenceError(
+                    f"{label} produced a nonblocking read refusal"
+                ) from error
+            if first_chunk:
+                notify("after-first-chunk", descriptor)
+                first_chunk = False
             if not chunk:
                 break
             chunks.append(chunk)
             remaining -= len(chunk)
         payload = b"".join(chunks)
-        if len(payload) != current.st_size:
+        if len(payload) > limit:
+            raise EvidenceError(f"{label} exceeds the {limit}-byte bound")
+        notify("before-post-fstat", descriptor)
+        after = os.fstat(descriptor)
+        if fingerprint(after) != fingerprint(before):
             raise EvidenceError(f"{label} changed during bounded read")
-        return payload, stat.S_IMODE(current.st_mode)
-    finally:
-        os.close(descriptor)
+        try:
+            final_path = target.lstat()
+        except OSError as error:
+            raise EvidenceError(f"{label} changed during bounded read") from error
+        if fingerprint(final_path) != fingerprint(before):
+            raise EvidenceError(f"{label} changed during bounded read")
+        if len(payload) != before.st_size:
+            raise EvidenceError(f"{label} changed during bounded read")
+        result = (
+            payload,
+            stat.S_IMODE(before.st_mode),
+            fingerprint(before),
+        )
+    except BaseException as error:
+        primary_error = error
+    close_error = None
+    if ownership._slot:
+        try:
+            ownership.close()
+        except BaseException as error:
+            close_error = error
+    cancellation = next(
+        (
+            error
+            for error in (primary_error, close_error)
+            if isinstance(error, (KeyboardInterrupt, SystemExit))
+        ),
+        None,
+    )
+    if cancellation is not None:
+        raise cancellation
+    if close_error is not None:
+        raise EvidenceError(
+            f"{label} descriptor close state is unknown: "
+            f"{type(close_error).__name__}"
+        ) from close_error
+    if primary_error is not None:
+        raise primary_error
+    return result
 
 
 def stage_artifact_bytes(
-    target: Path, payload: bytes, label: str, *, mode: int = 0o644
+    target: Path,
+    payload: bytes,
+    label: str,
+    *,
+    mode: int = 0o644,
+    checkpoint=None,
 ) -> Path:
     """Write and fsync one same-directory staging file without publication."""
-    descriptor, raw_path = tempfile.mkstemp(
-        dir=target.parent,
-        prefix=f".{target.name}.{label}.",
-        suffix=".tmp",
-    )
-    staged = Path(raw_path)
+    ownership = PublishedTemporaryFile()
+    staged = None
+    failures: list[BaseException] = []
     try:
+        descriptor, raw_path = ownership.acquire(
+            functools.partial(
+                tempfile.mkstemp,
+                dir=target.parent,
+                prefix=f".{target.name}.{label}.",
+                suffix=".tmp",
+            )
+        )
+        staged = Path(raw_path)
+        if checkpoint is not None:
+            checkpoint("after-mkstemp-publication", staged, descriptor)
         os.fchmod(descriptor, mode)
-        with os.fdopen(descriptor, "wb") as stream:
-            stream.write(payload)
-            stream.flush()
-            os.fsync(stream.fileno())
-    except Exception:
-        with contextlib.suppress(OSError):
-            os.close(descriptor)
-        with contextlib.suppress(OSError):
-            staged.unlink()
-        raise
+        view = memoryview(payload)
+        written = 0
+        while written < len(view):
+            count = os.write(descriptor, view[written:])
+            if count <= 0:
+                raise OSError("staging descriptor made no write progress")
+            written += count
+        os.fsync(descriptor)
+    except BaseException as error:
+        failures.append(error)
+    if staged is None and ownership._slot:
+        try:
+            staged = Path(ownership.raw_path)
+        except BaseException as error:
+            failures.append(error)
+    if ownership._slot:
+        try:
+            # Clear the sole fd token before the only close attempt.  A
+            # throwable is ambiguous and can never trigger an unsafe retry.
+            ownership.close()
+        except BaseException as error:
+            failures.append(error)
+    if failures:
+        if staged is not None:
+            try:
+                staged.unlink(missing_ok=True)
+            except BaseException as error:
+                failures.append(error)
+        cancellation = next(
+            (
+                error for error in failures
+                if isinstance(error, (KeyboardInterrupt, SystemExit))
+            ),
+            None,
+        )
+        if cancellation is not None:
+            secondary = [
+                f"{type(error).__name__} during staging cleanup"
+                for error in failures
+                if error is not cancellation
+            ]
+            if secondary:
+                cancellation.add_note("; ".join(dict.fromkeys(secondary)))
+            raise cancellation
+        raise EvidenceError(
+            f"{label} staging failed: "
+            + ", ".join(
+                dict.fromkeys(type(error).__name__ for error in failures)
+            )
+        ) from failures[0]
+    if staged is None:
+        raise EvidenceError(f"{label} staging path was not published")
     return staged
 
 
@@ -1658,12 +1927,41 @@ PAIR_JOURNAL_NAME = ".production-contract-artifact-pair-journal.json"
 
 
 def fsync_directory(directory: Path):
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
-    descriptor = os.open(directory, flags)
+    if not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_CLOEXEC"):
+        raise EvidenceError("directory fsync requires O_DIRECTORY and O_CLOEXEC")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC
+    ownership = PublishedDescriptor()
+    primary_error = None
     try:
+        descriptor = ownership.acquire(
+            functools.partial(os.open, directory, flags)
+        )
         os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
+    except BaseException as error:
+        primary_error = error
+    close_error = None
+    if ownership._slot:
+        try:
+            ownership.close()
+        except BaseException as error:
+            close_error = error
+    cancellation = next(
+        (
+            error
+            for error in (primary_error, close_error)
+            if isinstance(error, (KeyboardInterrupt, SystemExit))
+        ),
+        None,
+    )
+    if cancellation is not None:
+        raise cancellation
+    if close_error is not None:
+        raise EvidenceError(
+            "directory fsync descriptor close state is unknown: "
+            + type(close_error).__name__
+        ) from close_error
+    if primary_error is not None:
+        raise primary_error
 
 
 def artifact_pair_journal_path(
@@ -1677,7 +1975,12 @@ def artifact_pair_journal_path(
 
 
 def bounded_artifact_digest(path: Path, label: str) -> str | None:
-    prior = read_existing_artifact_bounded(path, label)
+    prior = read_bounded_regular(
+        path,
+        label,
+        MAX_EXISTING_ARTIFACT_BYTES,
+        True,
+    )
     return digest_bytes(prior[0]) if prior is not None else None
 
 
@@ -1689,33 +1992,63 @@ def path_entry_exists(path: Path) -> bool:
         return False
 
 
-def require_regular_owned_file(path: Path, label: str):
-    """Reject symlinks and non-regular recovery inputs before reading/moving."""
-    try:
-        mode = path.lstat().st_mode
-    except OSError as error:
-        raise EvidenceError(f"{label} is unavailable: {error}") from error
-    if not stat.S_ISREG(mode):
-        raise EvidenceError(f"{label} must be a non-symlink regular file")
-
-
 @contextlib.contextmanager
-def artifact_pair_publication_lock(directory: Path):
+def artifact_pair_publication_lock(directory: Path, *, checkpoint=None):
     """Serialize publishers on the stable directory inode without lock debris."""
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
-    descriptor = os.open(directory, flags)
+    if not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_CLOEXEC"):
+        raise EvidenceError("publication lock requires O_DIRECTORY and O_CLOEXEC")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC
+    ownership = PublishedDescriptor()
+    primary_error = None
+    boundary_error = None
+    close_error = None
     try:
+        descriptor = ownership.acquire(
+            functools.partial(os.open, directory, flags)
+        )
+        if checkpoint is not None:
+            checkpoint("after-open-publication", descriptor)
         try:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
             raise EvidenceError(
                 "artifact pair generation already active in this directory"
             ) from error
-        yield
-    finally:
-        with contextlib.suppress(OSError):
-            fcntl.flock(descriptor, fcntl.LOCK_UN)
-        os.close(descriptor)
+        yield descriptor
+    except BaseException as error:
+        primary_error = error
+    if ownership._slot:
+        if checkpoint is not None:
+            try:
+                checkpoint("before-close", ownership.descriptor)
+            except BaseException as error:
+                boundary_error = error
+        try:
+            # Closing is the single lock-release operation.  There is no
+            # cancellation-visible Python opcode between token consumption
+            # and fd close, and no separate unlock to leave half-finished.
+            ownership.close()
+        except BaseException as error:
+            close_error = error
+    cancellation = next(
+        (
+            error
+            for error in (primary_error, boundary_error, close_error)
+            if isinstance(error, (KeyboardInterrupt, SystemExit))
+        ),
+        None,
+    )
+    if cancellation is not None:
+        raise cancellation
+    if close_error is not None:
+        raise EvidenceError(
+            "publication lock descriptor close state is unknown: "
+            + type(close_error).__name__
+        ) from close_error
+    if boundary_error is not None:
+        raise boundary_error
+    if primary_error is not None:
+        raise primary_error
 
 
 def validate_pair_journal(
@@ -1790,13 +2123,22 @@ def recover_generated_artifact_pair(
 ) -> bool:
     """Restore the old pair from a prior incomplete publication journal."""
     journal_path = artifact_pair_journal_path(evidence_path, readme_path)
-    if not path_entry_exists(journal_path):
+    try:
+        journal_record = read_bounded_regular(
+            journal_path,
+            "artifact pair recovery journal",
+            MAX_PAIR_JOURNAL_BYTES,
+            True,
+        )
+    except (EvidenceError, OSError) as error:
+        raise EvidenceError(
+            "artifact pair recovery incomplete; journal and recoverable "
+            f"backups retained: {error}"
+        ) from error
+    if journal_record is None:
         return False
     try:
-        require_regular_owned_file(
-            journal_path, "artifact pair recovery journal"
-        )
-        raw = journal_path.read_bytes()
+        raw = journal_record[0]
         journal = load_json(raw)
         if canonical_bytes(journal) != raw:
             raise EvidenceError(
@@ -1823,30 +2165,41 @@ def recover_generated_artifact_pair(
                 if current_digest == entry["old_sha256"]:
                     continue
                 backup = directory / entry["backup"]
-                require_regular_owned_file(
+                backup_record = read_bounded_regular(
                     backup,
                     f"artifact pair recovery backup for {target.name}",
+                    MAX_EXISTING_ARTIFACT_BYTES,
+                    False,
                 )
-                backup_digest = bounded_artifact_digest(
-                    backup,
-                    f"artifact pair recovery backup for {target.name}",
-                )
+                backup_digest = digest_bytes(backup_record[0])
                 if backup_digest != entry["old_sha256"]:
                     raise EvidenceError(
                         f"artifact pair recovery backup digest failed for {target.name}"
                     )
-                os.replace(backup, target)
-                restored_digest = bounded_artifact_digest(
+                restore_stage = stage_artifact_bytes(
+                    target,
+                    backup_record[0],
+                    "restore",
+                    mode=backup_record[1],
+                )
+                os.replace(restore_stage, target)
+                restored_record = read_bounded_regular(
                     target,
                     f"restored artifact pair target {target.name}",
+                    MAX_EXISTING_ARTIFACT_BYTES,
+                    False,
                 )
-                if restored_digest != entry["old_sha256"]:
+                if (
+                    restored_record[0] != backup_record[0]
+                    or digest_bytes(restored_record[0])
+                    != entry["old_sha256"]
+                ):
                     raise EvidenceError(
                         f"artifact pair recovery digest failed for {target.name}"
                     )
             else:
                 target.unlink(missing_ok=True)
-                if target.exists():
+                if path_entry_exists(target):
                     raise EvidenceError(
                         f"artifact pair recovery could not remove {target.name}"
                     )
@@ -1903,8 +2256,11 @@ def publish_generated_artifacts_locked(
         (readme_path, render_readme(expected)),
     )
     prior_artifacts = tuple(
-        read_existing_artifact_bounded(
-            target, f"existing artifact target {target.name}"
+        read_bounded_regular(
+            target,
+            f"existing artifact target {target.name}",
+            MAX_EXISTING_ARTIFACT_BYTES,
+            True,
         )
         for target, _payload in targets
     )
@@ -1961,13 +2317,28 @@ def publish_generated_artifacts_locked(
                 )
             ],
         }
+        journal_bytes = canonical_bytes(journal)
+        if len(journal_bytes) > MAX_PAIR_JOURNAL_BYTES:
+            raise EvidenceError(
+                "artifact pair recovery journal exceeds its explicit bound"
+            )
         journal_stage = stage_artifact_bytes(
-            journal_path, canonical_bytes(journal), "new"
+            journal_path, journal_bytes, "new"
         )
         os.replace(journal_stage, journal_path)
         journal_stage = None
+        persisted_journal = read_bounded_regular(
+            journal_path,
+            "new artifact pair recovery journal",
+            MAX_PAIR_JOURNAL_BYTES,
+            False,
+        )
+        if persisted_journal[0] != journal_bytes:
+            raise EvidenceError(
+                "new artifact pair recovery journal bytes changed"
+            )
         fsync_directory(journal_path.parent)
-    except OSError as error:
+    except BaseException as error:
         if not path_entry_exists(journal_path):
             for path in [
                 *staged,
@@ -1980,6 +2351,8 @@ def publish_generated_artifacts_locked(
             detail = ""
         else:
             detail = "; recovery journal and staged pair retained"
+        if isinstance(error, (KeyboardInterrupt, SystemExit)):
+            raise
         raise EvidenceError(
             f"artifact pair staging failed before publication: {error}{detail}"
         ) from error
@@ -1989,12 +2362,27 @@ def publish_generated_artifacts_locked(
             staged, targets, strict=True
         ):
             os.replace(staged_path, target)
-    except OSError as error:
+        for target, intended_payload in targets:
+            published = read_bounded_regular(
+                target,
+                f"newly published artifact target {target.name}",
+                MAX_EXISTING_ARTIFACT_BYTES,
+                False,
+            )
+            if published[0] != intended_payload:
+                raise EvidenceError(
+                    f"newly published artifact bytes changed for {target.name}"
+                )
+    except BaseException as error:
         try:
             recover_generated_artifact_pair(evidence_path, readme_path)
             detail = "; old pair restored and recovery journal cleared"
         except EvidenceError as rollback_error:
             detail = f"; {rollback_error}"
+        if isinstance(error, (KeyboardInterrupt, SystemExit)):
+            if detail:
+                error.add_note(detail.lstrip("; "))
+            raise
         raise EvidenceError(
             f"artifact pair publication failed: {error}{detail}"
         ) from error
@@ -2546,6 +2934,14 @@ def origin_strategy_projection(stream):
 def generation_contract_projection():
     git_executable = trusted_git_executable()
     return {
+        "artifact_reader": {
+            "artifact_limit_bytes": MAX_EXISTING_ARTIFACT_BYTES,
+            "journal_limit_bytes": MAX_PAIR_JOURNAL_BYTES,
+            "required_flags": ["O_CLOEXEC", "O_NOFOLLOW", "O_NONBLOCK"],
+            "stable_fields": [
+                "type", "dev", "ino", "size", "mtime_ns", "ctime_ns"
+            ],
+        },
         "caller_rows_authoritative": False,
         "comparison_requires_exact_bytes": True,
         "fresh_internal_replay": True,
@@ -2553,6 +2949,7 @@ def generation_contract_projection():
             "isolated -I/-S Python with an explicit Git/Python environment "
             "allowlist"
         ),
+        "fixture_date": "2026-09-02",
         "trusted_git": {
             "path": str(git_executable),
             "sha256": digest_bytes(git_executable.read_bytes()),
@@ -2573,8 +2970,10 @@ def generation_contract_projection():
         "publication_pair_rollback": True,
         "publication_crash_boundary": (
             "portable filesystems cannot atomically exchange two paths; an "
-            "unreported process or machine crash between replacements can "
-            "still expose a mixed pair"
+            "unreported process or machine crash can temporarily expose a "
+            "mixed pair, but the retained fsynced journal/backups make the "
+            "next locked invocation restore or refuse it; hostile replacement "
+            "of the parent directory inode is outside this POC"
         ),
         "publication_requires_exact_bytes": True,
         "raw_jsonl": {
@@ -3230,6 +3629,7 @@ def validate_manifest(manifest):
                 (
                     "cases", "entrypoint", "execution_seam",
                     "importable_api", "kind", "payload_grammar",
+                    "typed_cli_inputs",
                 ),
                 f"{context}.observation",
             )
@@ -3249,394 +3649,28 @@ def validate_manifest(manifest):
                     ],
                     "push": ["before", "after"],
                 }
-            ):
-                raise EvidenceError(f"{context} event adapter grammar changed")
-            if observation["importable_api"] != {
-                "endpoint_derivation": (
-                    "event_endpoints(event_kind: str, payload: "
-                    "Mapping[str, Any]) -> EventEndpoints"
-                ),
-                "typed_U_audit": (
-                    "audit_event(root: Path, event_kind: str, payload: "
-                    "Mapping[str, Any], *, budget_limit: int | None = None, "
-                    "transaction: Callable[[], ContextManager["
-                    "GitSpawnObserver | None]] | None = None) -> dict"
-                ),
-            }:
-                raise EvidenceError(f"{context} importable adapter API changed")
-            seam = observation["execution_seam"]
-            require_keys(
-                seam,
-                (
-                    "after_spawn_base_exception",
-                    "after_spawn_cancellations",
-                    "ambient_delegating_wrapper",
-                    "factory_throwables",
-                    "identical_endpoint_rejections",
-                    "invalid",
-                    "invalid_budget_rejections",
-                    "invalid_runtime_inputs",
-                    "nested_reentry",
-                    "piped_child_after_spawn",
-                    "result_owned_by_audit",
-                    "spawn_factory_failure",
-                    "threaded_serialization",
-                    "unrelated_thread_isolation",
-                    "valid",
-                ),
-                f"{context}.execution_seam",
-            )
-            seam_keys = (
-                "adapter_status", "after_spawns",
-                "all_observed_pids_reaped", "all_pids_concrete",
-                "all_pids_unique", "ambient_wrapper_calls", "audit_exit",
-                "before_spawns", "commands_match", "git_subprocesses",
-                "reason", "result_git_process_attempts",
-                "result_git_processes", "transaction_entries",
-                "typed_origin_strategy",
-            )
-            for name in (
-                "after_spawn_base_exception", "ambient_delegating_wrapper",
-                "invalid", "spawn_factory_failure", "valid",
-            ):
-                item = seam[name]
-                require_keys(item, seam_keys, f"{context}.execution_seam.{name}")
-            if (
-                seam["valid"]["audit_exit"] != 0
-                or seam["valid"]["transaction_entries"] != 1
-                or seam["valid"]["git_subprocesses"] <= 0
-                or seam["valid"]["before_spawns"]
-                != seam["valid"]["git_subprocesses"]
-                or seam["valid"]["after_spawns"]
-                != seam["valid"]["git_subprocesses"]
-                or seam["valid"]["commands_match"] is not True
-                or seam["valid"]["all_pids_concrete"] is not True
-                or seam["valid"]["all_pids_unique"] is not True
-                or seam["valid"]["ambient_wrapper_calls"] != 0
-                or seam["valid"]["all_observed_pids_reaped"] is not None
-                or seam["valid"]["git_subprocesses"]
-                != seam["valid"]["result_git_processes"]
-                or seam["valid"]["before_spawns"]
-                != seam["valid"]["result_git_process_attempts"]
-                or seam["valid"]["typed_origin_strategy"] != "U"
-                or seam["valid"]["adapter_status"] != "accepted"
-                or seam["result_owned_by_audit"] is not True
-                or seam["invalid"] != {
-                    "adapter_status": "coverage-unavailable",
-                    "after_spawns": 0,
-                    "all_observed_pids_reaped": None,
-                    "all_pids_concrete": True,
-                    "all_pids_unique": True,
-                    "ambient_wrapper_calls": 0,
-                    "audit_exit": 2,
-                    "before_spawns": 0,
-                    "commands_match": True,
-                    "git_subprocesses": 0,
-                    "reason": "coverage-unavailable: local.old is missing",
-                    "result_git_process_attempts": 0,
-                    "result_git_processes": 0,
-                    "transaction_entries": 0,
-                    "typed_origin_strategy": "U",
+                or observation["importable_api"]
+                != {
+                    "endpoint_derivation": (
+                        "event_endpoints(event_kind: str, payload: "
+                        "Mapping[str, Any]) -> EventEndpoints"
+                    ),
+                    "typed_U_audit": (
+                        "audit_event(root: Path, event_kind: str, payload: "
+                        "Mapping[str, Any], *, git_runner: TrustedGitRunner, "
+                        "budget_limit: int | None = None, transaction: "
+                        "Callable[[], ContextManager[GitSpawnObserver | None]] "
+                        "| None = None) -> dict"
+                    ),
                 }
             ):
-                raise EvidenceError(f"{context} execution seam escaped accounting")
-            rejection_groups = (
-                (
-                    seam["identical_endpoint_rejections"],
-                    {"local", "pre-push", "push", "pull-request-synchronize"},
-                    "O and N must be distinct Git OIDs",
-                ),
-                (
-                    seam["invalid_budget_rejections"],
-                    {
-                        "zero", "negative", "bool-false", "bool-true",
-                        "float", "string",
-                    },
-                    "budget must be an exact positive integer",
-                ),
-            )
-            for group, expected_names, reason in rejection_groups:
-                if set(group) != expected_names:
-                    raise EvidenceError(
-                        f"{context} pre-execution rejection catalog changed"
-                    )
-                for name, item in group.items():
-                    require_keys(
-                        item,
-                        seam_keys,
-                        f"{context}.execution_seam.rejections.{name}",
-                    )
-                    if (
-                        item["adapter_status"] != "coverage-unavailable"
-                        or item["after_spawns"] != 0
-                        or item["all_pids_concrete"] is not True
-                        or item["all_pids_unique"] is not True
-                        or item["all_observed_pids_reaped"] is not None
-                        or item["ambient_wrapper_calls"] != 0
-                        or item["audit_exit"] != 2
-                        or item["before_spawns"] != 0
-                        or item["commands_match"] is not True
-                        or item["git_subprocesses"] != 0
-                        or item["result_git_processes"] != 0
-                        or item["result_git_process_attempts"] != 0
-                        or item["transaction_entries"] != 0
-                        or item["typed_origin_strategy"] != "U"
-                        or reason not in item["reason"]
-                    ):
-                        raise EvidenceError(
-                            f"{context} rejection {name} entered execution"
-                        )
-            runtime_inputs = seam["invalid_runtime_inputs"]
-            expected_runtime_inputs = {
-                "event-kind-dict": "event kind must be a string",
-                "event-kind-list": "event kind must be a string",
-                "payload-int": "event payload must be a mapping",
-                "payload-list": "event payload must be a mapping",
-                "payload-none": "event payload must be a mapping",
-            }
-            if set(runtime_inputs) != set(expected_runtime_inputs):
-                raise EvidenceError(
-                    f"{context} invalid runtime input catalog changed"
-                )
-            for name, reason in expected_runtime_inputs.items():
-                wrapper = runtime_inputs[name]
-                require_keys(
-                    wrapper, ("observation", "reason"),
-                    f"{context}.execution_seam.invalid_runtime_inputs.{name}",
-                )
-                item = wrapper["observation"]
-                require_keys(
-                    item, seam_keys,
-                    f"{context}.execution_seam.invalid_runtime_inputs.{name}.observation",
-                )
-                if (
-                    wrapper["reason"] != reason
-                    or item["adapter_status"] != "coverage-unavailable"
-                    or item["audit_exit"] != 2
-                    or item["transaction_entries"] != 0
-                    or item["before_spawns"] != 0
-                    or item["after_spawns"] != 0
-                    or item["git_subprocesses"] != 0
-                    or item["result_git_process_attempts"] != 0
-                    or item["result_git_processes"] != 0
-                    or item["ambient_wrapper_calls"] != 0
-                    or reason not in item["reason"]
-                    or item["typed_origin_strategy"] != "U"
-                ):
-                    raise EvidenceError(
-                        f"{context} invalid runtime input entered execution"
-                    )
-            factory = seam["spawn_factory_failure"]
-            if (
-                factory["audit_exit"] != 2
-                or factory["transaction_entries"] != 1
-                or factory["before_spawns"] != 1
-                or factory["after_spawns"] != 0
-                or factory["git_subprocesses"] != 0
-                or factory["result_git_process_attempts"] != 1
-                or factory["result_git_processes"] != 0
-                or factory["ambient_wrapper_calls"] != 0
-                or factory["reason"]
-                != "Git process factory failed: FileNotFoundError"
-            ):
-                raise EvidenceError(
-                    f"{context} spawn attempt/child accounting changed"
-                )
-            factory_throwables = seam["factory_throwables"]
-            expected_factory_types = {
-                "direct-base-exception": "FactoryBaseException",
-                "runtime-error": "RuntimeError",
-                "subprocess-error": "SubprocessError",
-            }
-            if set(factory_throwables) != set(expected_factory_types):
-                raise EvidenceError(
-                    f"{context} factory throwable catalog changed"
-                )
-            for name, type_name in expected_factory_types.items():
-                item = factory_throwables[name]
-                require_keys(
-                    item,
-                    seam_keys,
-                    f"{context}.execution_seam.factory_throwables.{name}",
-                )
-                if (
-                    item["audit_exit"] != 2
-                    or item["transaction_entries"] != 1
-                    or item["before_spawns"] != 1
-                    or item["after_spawns"] != 0
-                    or item["git_subprocesses"] != 0
-                    or item["result_git_process_attempts"] != 1
-                    or item["result_git_processes"] != 0
-                    or item["ambient_wrapper_calls"] != 0
-                    or item["adapter_status"] != "accepted"
-                    or item["reason"]
-                    != f"Git process factory failed: {type_name}"
-                ):
-                    raise EvidenceError(
-                        f"{context} factory throwable {name} escaped typed refusal"
-                    )
-            after_base = seam["after_spawn_base_exception"]
-            if (
-                after_base["audit_exit"] != 2
-                or after_base["transaction_entries"] != 1
-                or after_base["before_spawns"] != 1
-                or after_base["after_spawns"] != 1
-                or after_base["git_subprocesses"] != 1
-                or after_base["result_git_process_attempts"] != 1
-                or after_base["result_git_processes"] != 1
-                or after_base["all_observed_pids_reaped"] is not True
-                or "observer failed after process creation"
-                not in after_base["reason"]
-            ):
-                raise EvidenceError(
-                    f"{context} after-spawn throwable cleanup changed"
-                )
-            if seam["after_spawn_cancellations"] != {
-                "keyboard": {
-                    "after_spawns": 1,
-                    "all_observed_pids_reaped": True,
-                    "before_spawns": 1,
-                    "cleanup_failure_reported": False,
-                    "transaction_entries": 1,
-                    "throwable": "KeyboardInterrupt",
-                },
-                "system-exit-with-cleanup-report": {
-                    "after_spawns": 1,
-                    "all_observed_pids_reaped": True,
-                    "before_spawns": 1,
-                    "cleanup_failure_reported": True,
-                    "transaction_entries": 1,
-                    "throwable": "SystemExit",
-                },
-            }:
-                raise EvidenceError(
-                    f"{context} cancellation cleanup/reporting changed"
-                )
-            if seam["piped_child_after_spawn"] != {
-                "keyboard": {
-                    "after_spawns": 2,
-                    "audit_exit": None,
-                    "before_spawns": 2,
-                    "child_reaped": True,
-                    "piped_labels": ["stderr", "stdout"],
-                    "pipe_descriptors_closed": True,
-                    "result_git_processes": None,
-                    "reused_descriptors_survived_gc": True,
-                    "throwable": "KeyboardInterrupt",
-                },
-                "runtime": {
-                    "after_spawns": 2,
-                    "audit_exit": 2,
-                    "before_spawns": 2,
-                    "child_reaped": True,
-                    "piped_labels": ["stderr", "stdout"],
-                    "pipe_descriptors_closed": True,
-                    "result_git_processes": 2,
-                    "reused_descriptors_survived_gc": True,
-                    "throwable": None,
-                },
-            }:
-                raise EvidenceError(
-                    f"{context} piped-child ownership cleanup changed"
-                )
-            threaded = seam["threaded_serialization"]
-            if set(threaded) != {"different-repository", "same-repository"}:
-                raise EvidenceError(
-                    f"{context} threaded serialization catalog changed"
-                )
-            expected_thread_calls = [
-                {
-                    "adapter_status": "accepted",
-                    "after_spawns": 4,
-                    "attempts": 4,
-                    "audit_exit": 0,
-                    "before_spawns": 4,
-                    "classification": "no-finding",
-                    "processes": 4,
-                    "unique_pids": True,
-                },
-                {
-                    "adapter_status": "audit-busy",
-                    "after_spawns": 0,
-                    "attempts": 0,
-                    "audit_exit": 2,
-                    "before_spawns": 0,
-                    "classification": "unreadable",
-                    "processes": 0,
-                    "unique_pids": True,
-                },
-            ]
-            for name, item in threaded.items():
-                require_keys(
-                    item,
-                    (
-                        "ambient_factory_restored_exactly",
-                        "ambient_wrapper_calls", "calls",
-                        "different_repositories", "failures",
-                        "threads_completed",
-                    ),
-                    f"{context}.execution_seam.threaded_serialization.{name}",
-                )
-                if (
-                    item["ambient_factory_restored_exactly"] is not True
-                    or item["ambient_wrapper_calls"] != 0
-                    or item["calls"] != expected_thread_calls
-                    or item["different_repositories"]
-                    is (name == "same-repository")
-                    or item["failures"] != [None, None]
-                    or item["threads_completed"] is not True
-                ):
-                    raise EvidenceError(
-                        f"{context} threaded serialization {name} changed"
-                    )
-            if seam["nested_reentry"] != {
-                "nested_actual": 0,
-                "nested_attempts": 0,
-                "nested_status": "audit-busy",
-                "nested_transaction_entries": 0,
-                "outer_actual": 4,
-                "outer_after": 4,
-                "outer_attempts": 4,
-                "outer_before": 4,
-                "outer_exit": 0,
-            }:
-                raise EvidenceError(
-                    f"{context} nested single-flight refusal changed"
-                )
-            if seam["unrelated_thread_isolation"] != {
-                "ambient_factory_restored_exactly": True,
-                "ambient_wrapper_calls": 1,
-                "observer_after": 1,
-                "observer_before": 1,
-                "owned_actual": 1,
-                "owned_attempts": 1,
-                "unrelated_failure": None,
-                "unrelated_thread_completed": True,
-            }:
-                raise EvidenceError(
-                    f"{context} unrelated-thread process isolation changed"
-                )
-            ambient = seam["ambient_delegating_wrapper"]
-            if (
-                ambient["audit_exit"] != 0
-                or ambient["transaction_entries"] != 1
-                or ambient["git_subprocesses"] <= 0
-                or ambient["before_spawns"] != ambient["git_subprocesses"]
-                or ambient["after_spawns"] != ambient["git_subprocesses"]
-                or ambient["result_git_process_attempts"]
-                != ambient["git_subprocesses"]
-                or ambient["result_git_processes"]
-                != ambient["git_subprocesses"]
-                or ambient["all_pids_unique"] is not True
-                or ambient["ambient_wrapper_calls"] != 0
-            ):
-                raise EvidenceError(
-                    f"{context} production Git spawn primitive re-entered"
-                )
+                raise EvidenceError(f"{context} event adapter contract changed")
             cases = observation["cases"]
-            if set(cases) != {"blocking", "clean", "unavailable"}:
-                raise EvidenceError(f"{context} event adapter cases changed")
-            expectations = {
+            require_keys(
+                cases, ("blocking", "clean", "unavailable"),
+                f"{context}.observation.cases",
+            )
+            expected_cases = {
                 "blocking": ("accepted", "blocking-finding", 1),
                 "clean": ("accepted", "no-finding", 0),
                 "unavailable": ("coverage-unavailable", "unreadable", 2),
@@ -3645,8 +3679,9 @@ def validate_manifest(manifest):
                 require_keys(
                     item,
                     (
-                        "adapter_status", "classification", "exit", "reason",
+                        "adapter_status", "classification", "exit",
                         "stdout_canonical", "typed_origin_strategy",
+                        "typed_results_equal",
                     ),
                     f"{context}.observation.cases.{name}",
                 )
@@ -3656,25 +3691,614 @@ def validate_manifest(manifest):
                         item["classification"],
                         item["exit"],
                     )
-                    != expectations[name]
+                    != expected_cases[name]
                     or item["stdout_canonical"] is not True
                     or item["typed_origin_strategy"] != "U"
+                    or item["typed_results_equal"] is not True
                 ):
                     raise EvidenceError(
-                        f"{context} event adapter exit contract changed"
+                        f"{context} event CLI/import result contract changed"
                     )
+            typed_cli = observation["typed_cli_inputs"]
+            require_keys(
+                typed_cli,
+                ("non-mapping-payload", "unsupported-event-kind"),
+                f"{context}.observation.typed_cli_inputs",
+            )
+            for name, item in typed_cli.items():
+                if item != {
+                    "adapter_status": "coverage-unavailable",
+                    "audit_exit": 2,
+                    "classification": "unreadable",
+                    "stdout_canonical": True,
+                }:
+                    raise EvidenceError(
+                        f"{context} typed CLI input {name} escaped JSON"
+                    )
+
+            seam = observation["execution_seam"]
+            require_keys(
+                seam,
+                (
+                    "cache_isolation", "duplicate_module_concurrency",
+                    "fixture_date_replay", "hostile_ambient_subprocess",
+                    "identical_endpoint_rejections", "invalid",
+                    "invalid_budget_rejections", "invalid_runtime_inputs",
+                    "nested_reentry", "noncallable_runner",
+                    "observer_throwables", "runner_cancellation",
+                    "runner_ordinal_failures", "runner_throwables",
+                    "same_module_concurrency", "static_contract",
+                    "session_setup_cancellation_boundaries",
+                    "spawn_construction_cancellation_boundaries",
+                    "trace_cancellation_boundaries",
+                    "transaction_cancellations",
+                    "transaction_throwables", "truthy_exit_ignored",
+                    "valid",
+                ),
+                f"{context}.execution_seam",
+            )
+            probe_keys = (
+                "adapter_status", "after", "all_pids_reaped",
+                "all_runner_pids_reaped",
+                "attempts", "audit_exit", "before", "caught",
+                "classification", "commands_match", "created", "fd_delta",
+                "lifecycle", "private_modules_leaked", "reason",
+                "runner_calls", "runner_created",
+                "typed_origin_strategy",
+            )
+
+            def validate_probe(name, item):
+                require_keys(
+                    item, probe_keys,
+                    f"{context}.execution_seam.{name}",
+                )
+                require_keys(
+                    item["lifecycle"],
+                    (
+                        "enter", "exit", "exit_after_reap",
+                        "exit_exception", "factory",
+                    ),
+                    f"{context}.execution_seam.{name}.lifecycle",
+                )
+                if item["private_modules_leaked"]:
+                    raise EvidenceError(
+                        f"{context} {name} leaked private reconciler modules"
+                    )
+
+            valid = seam["valid"]
+            validate_probe("valid", valid)
+            if (
+                valid["adapter_status"] != "accepted"
+                or valid["audit_exit"] != 0
+                or valid["classification"] != "no-finding"
+                or valid["created"] <= 0
+                or valid["attempts"] != valid["created"]
+                or valid["before"] != valid["created"]
+                or valid["after"] != valid["created"]
+                or valid["runner_calls"] != valid["created"]
+                or valid["runner_created"] != valid["created"]
+                or valid["commands_match"] is not True
+                or valid["all_pids_reaped"] is not True
+                or valid["all_runner_pids_reaped"] is not True
+                or valid["fd_delta"] != 0
+                or valid["typed_origin_strategy"] != "U"
+                or valid["lifecycle"]
+                != {
+                    "enter": 1,
+                    "exit": 1,
+                    "exit_after_reap": True,
+                    "exit_exception": None,
+                    "factory": 1,
+                }
+            ):
+                raise EvidenceError(
+                    f"{context} valid audit escaped session accounting"
+                )
+
+            def validate_rejection(name, item, reason):
+                validate_probe(name, item)
+                if (
+                    item["adapter_status"] != "coverage-unavailable"
+                    or item["audit_exit"] != 2
+                    or item["classification"] != "unreadable"
+                    or item["attempts"] != 0
+                    or item["created"] != 0
+                    or item["before"] != 0
+                    or item["after"] != 0
+                    or item["runner_calls"] != 0
+                    or item["runner_created"] != 0
+                    or item["lifecycle"]["factory"] != 0
+                    or item["typed_origin_strategy"] != "U"
+                    or reason not in item["reason"]
+                ):
+                    raise EvidenceError(
+                        f"{context} {name} entered execution"
+                    )
+
+            validate_rejection(
+                "invalid", seam["invalid"], "local.old is missing"
+            )
+            rejection_groups = (
+                (
+                    seam["identical_endpoint_rejections"],
+                    {"local", "pre-push", "push",
+                     "pull-request-synchronize"},
+                    "O and N must be distinct Git OIDs",
+                ),
+                (
+                    seam["invalid_budget_rejections"],
+                    {"zero", "negative", "bool-false", "bool-true",
+                     "float", "string"},
+                    "budget must be an exact positive integer",
+                ),
+            )
+            for group, expected_names, reason in rejection_groups:
+                if set(group) != expected_names:
+                    raise EvidenceError(
+                        f"{context} rejection catalog changed"
+                    )
+                for name, item in group.items():
+                    validate_rejection(name, item, reason)
+            expected_runtime = {
+                "event-kind-dict": "event kind must be a string",
+                "event-kind-list": "event kind must be a string",
+                "payload-int": "event payload must be a mapping",
+                "payload-list": "event payload must be a mapping",
+                "payload-none": "event payload must be a mapping",
+            }
+            if set(seam["invalid_runtime_inputs"]) != set(expected_runtime):
+                raise EvidenceError(
+                    f"{context} runtime input rejection catalog changed"
+                )
+            for name, reason in expected_runtime.items():
+                validate_rejection(
+                    name, seam["invalid_runtime_inputs"][name], reason
+                )
+
+            ordinal = seam["runner_ordinal_failures"]
+            if set(ordinal) != {"1", "2", "3", "4"}:
+                raise EvidenceError(
+                    f"{context} runtime launch ordinal catalog changed"
+                )
+            for name, item in ordinal.items():
+                validate_probe(f"runner-ordinal-{name}", item)
+                number = int(name)
+                if (
+                    item["audit_exit"] != 2
+                    or item["attempts"] != number
+                    or item["created"] != number - 1
+                    or item["before"] != number
+                    or item["after"] != number - 1
+                    or item["runner_calls"] != number
+                    or item["runner_created"] != number - 1
+                    or item["all_pids_reaped"] is not True
+                    or "Git process factory failed" not in item["reason"]
+                ):
+                    raise EvidenceError(
+                        f"{context} runner ordinal {name} false-greened"
+                    )
+            require_keys(
+                seam["runner_throwables"],
+                ("direct-base", "runtime", "subprocess"),
+                f"{context}.runner_throwables",
+            )
+            for name, item in seam["runner_throwables"].items():
+                validate_probe(f"runner-throwable-{name}", item)
+                if (
+                    item["audit_exit"] != 2
+                    or item["attempts"] != 1
+                    or item["created"] != 0
+                    or item["before"] != 1
+                    or item["after"] != 0
+                    or item["caught"] is not None
+                    or item["all_pids_reaped"] is not True
+                ):
+                    raise EvidenceError(
+                        f"{context} runner throwable {name} escaped"
+                    )
+            validate_probe(
+                "runner-cancellation", seam["runner_cancellation"]
+            )
+            if (
+                seam["runner_cancellation"]["caught"]
+                != "KeyboardInterrupt"
+                or seam["runner_cancellation"]["all_pids_reaped"] is not True
+            ):
+                raise EvidenceError(
+                    f"{context} runner cancellation escaped cleanup"
+                )
+
+            require_keys(
+                seam["observer_throwables"],
+                ("direct-base", "keyboard", "runtime"),
+                f"{context}.observer_throwables",
+            )
+            for name, item in seam["observer_throwables"].items():
+                validate_probe(f"observer-{name}", item)
+                if item["all_pids_reaped"] is not True:
+                    raise EvidenceError(
+                        f"{context} observer {name} left a child"
+                    )
+            if (
+                seam["observer_throwables"]["runtime"]["audit_exit"] != 2
+                or seam["observer_throwables"]["direct-base"]["audit_exit"]
+                != 2
+                or seam["observer_throwables"]["keyboard"]["caught"]
+                != "KeyboardInterrupt"
+            ):
+                raise EvidenceError(
+                    f"{context} observer throwable typing changed"
+                )
+
+            transaction_throwables = seam["transaction_throwables"]
+            expected_transaction_throwables = {
+                f"{stage}-{kind}"
+                for stage in ("factory", "enter", "exit")
+                for kind in ("runtime", "direct-base")
+            }
+            if set(transaction_throwables) != expected_transaction_throwables:
+                raise EvidenceError(
+                    f"{context} transaction throwable catalog changed"
+                )
+            for name, item in transaction_throwables.items():
+                validate_probe(f"transaction-{name}", item)
+                stage = name.split("-", 1)[0]
+                if (
+                    item["audit_exit"] != 2
+                    or item["caught"] is not None
+                    or item["lifecycle"]["exit"]
+                    != int(stage == "exit")
+                    or (item["attempts"] == 0)
+                    is not (stage in {"factory", "enter"})
+                    or stage not in item["reason"]
+                    or item["all_pids_reaped"] is not True
+                ):
+                    raise EvidenceError(
+                        f"{context} transaction {name} typing changed"
+                    )
+            require_keys(
+                seam["transaction_cancellations"],
+                ("enter", "exit", "factory"),
+                f"{context}.transaction_cancellations",
+            )
+            for stage, item in seam["transaction_cancellations"].items():
+                validate_probe(f"transaction-cancellation-{stage}", item)
+                if (
+                    item["caught"] != "KeyboardInterrupt"
+                    or item["all_pids_reaped"] is not True
+                    or item["lifecycle"]["exit"] != int(stage == "exit")
+                ):
+                    raise EvidenceError(
+                        f"{context} transaction cancellation {stage} changed"
+                    )
+            trace_boundaries = seam["trace_cancellation_boundaries"]
+            require_keys(
+                trace_boundaries,
+                ("after-enter", "after-session-close"),
+                f"{context}.trace_cancellation_boundaries",
+            )
+            for stage, item in trace_boundaries.items():
+                validate_probe(f"transaction-boundary-{stage}", item)
+                if (
+                    item["caught"] != "KeyboardInterrupt"
+                    or item["all_runner_pids_reaped"] is not True
+                    or item["fd_delta"] != 0
+                    or item["lifecycle"]
+                    != {
+                        "enter": 1,
+                        "exit": 1,
+                        "exit_after_reap": True,
+                        "exit_exception": "KeyboardInterrupt",
+                        "factory": 1,
+                    }
+                ):
+                    raise EvidenceError(
+                        f"{context} transaction boundary {stage} leaked"
+                    )
+            if (
+                trace_boundaries["after-enter"]["after"] != 0
+                or trace_boundaries["after-session-close"]["after"]
+                != valid["after"]
+            ):
+                raise EvidenceError(
+                    f"{context} transaction boundary work changed"
+                )
+            session_boundaries = seam[
+                "session_setup_cancellation_boundaries"
+            ]
+            require_keys(
+                session_boundaries,
+                ("after-context-set", "after-reconciler-load"),
+                f"{context}.session_setup_cancellation_boundaries",
+            )
+            for stage, item in session_boundaries.items():
+                validate_probe(f"session-boundary-{stage}", item)
+                if (
+                    item["caught"] != "KeyboardInterrupt"
+                    or item["all_runner_pids_reaped"] is not True
+                    or item["fd_delta"] != 0
+                    or item["lifecycle"]["factory"] != 0
+                ):
+                    raise EvidenceError(
+                        f"{context} session boundary {stage} leaked"
+                    )
+            spawn_boundaries = seam[
+                "spawn_construction_cancellation_boundaries"
+            ]
+            require_keys(
+                spawn_boundaries,
+                (
+                    "after-pipe-attachment",
+                    "after-runner-publication",
+                    "after-runner-return",
+                ),
+                f"{context}.spawn_construction_cancellation_boundaries",
+            )
+            for stage, item in spawn_boundaries.items():
+                validate_probe(f"spawn-boundary-{stage}", item)
+                if (
+                    item["caught"] != "KeyboardInterrupt"
+                    or item["all_runner_pids_reaped"] is not True
+                    or item["fd_delta"] != 0
+                    or item["runner_created"] != 1
+                    or item["lifecycle"]
+                    != {
+                        "enter": 1,
+                        "exit": 1,
+                        "exit_after_reap": True,
+                        "exit_exception": "KeyboardInterrupt",
+                        "factory": 1,
+                    }
+                ):
+                    raise EvidenceError(
+                        f"{context} spawn boundary {stage} leaked"
+                    )
+            validate_probe(
+                "truthy-exit", seam["truthy_exit_ignored"]
+            )
+            if seam["truthy_exit_ignored"]["audit_exit"] != 0:
+                raise EvidenceError(
+                    f"{context} truthy transaction exit suppressed result"
+                )
+            validate_probe(
+                "noncallable-runner", seam["noncallable_runner"]
+            )
+            if (
+                seam["noncallable_runner"]["audit_exit"] != 2
+                or "repository session construction failed: TypeError"
+                not in seam["noncallable_runner"]["reason"]
+            ):
+                raise EvidenceError(
+                    f"{context} noncallable runner was not typed"
+                )
+
+            hostile = seam["hostile_ambient_subprocess"]
+            require_keys(
+                hostile,
+                (*probe_keys, "popen_identity_unchanged"),
+                f"{context}.hostile_ambient_subprocess",
+            )
+            if (
+                hostile["audit_exit"] != 0
+                or hostile["popen_identity_unchanged"] is not True
+                or hostile["runner_calls"] != hostile["created"]
+            ):
+                raise EvidenceError(
+                    f"{context} ambient subprocess leaked into audit"
+                )
+
+            def validate_concurrency(name, item, shared):
+                expected_keys = {
+                    "ambient_popen_identity_unchanged", "calls",
+                    "failures", "shared_runner_calls",
+                    "threads_completed",
+                }
+                if name == "duplicate-module":
+                    expected_keys.add("private_modules_leaked")
+                require_keys(
+                    item, expected_keys,
+                    f"{context}.concurrency.{name}",
+                )
+                if (
+                    item["threads_completed"] is not True
+                    or item["failures"] != [None, None]
+                    or item["ambient_popen_identity_unchanged"] is not True
+                    or (
+                        name == "duplicate-module"
+                        and item["private_modules_leaked"]
+                    )
+                    or len(item["calls"]) != 2
+                ):
+                    raise EvidenceError(
+                        f"{context} {name} concurrency did not complete"
+                    )
+                for call in item["calls"]:
+                    require_keys(
+                        call,
+                        (
+                            "adapter_status", "after", "attempts",
+                            "audit_exit", "before", "created",
+                            "pids_unique",
+                        ),
+                        f"{context}.concurrency.{name}.call",
+                    )
+                    if (
+                        call["adapter_status"] != "accepted"
+                        or call["audit_exit"] != 0
+                        or call["attempts"] != call["created"]
+                        or call["before"] != call["created"]
+                        or call["after"] != call["created"]
+                        or call["created"] <= 0
+                        or call["pids_unique"] is not True
+                    ):
+                        raise EvidenceError(
+                            f"{context} {name} cross-accounted an audit"
+                        )
+                expected_shared = (
+                    sum(call["created"] for call in item["calls"])
+                    if shared
+                    else None
+                )
+                if item["shared_runner_calls"] != expected_shared:
+                    raise EvidenceError(
+                        f"{context} {name} shared runner count changed"
+                    )
+
+            same_module = seam["same_module_concurrency"]
+            require_keys(
+                same_module, ("different-root", "same-root"),
+                f"{context}.same_module_concurrency",
+            )
+            validate_concurrency(
+                "same-root", same_module["same-root"], False
+            )
+            validate_concurrency(
+                "different-root", same_module["different-root"], True
+            )
+            validate_concurrency(
+                "duplicate-module",
+                seam["duplicate_module_concurrency"],
+                True,
+            )
+
+            if (
+                seam["cache_isolation"]
+                != {
+                    "carry_cache_distinct": True,
+                    "carry_cache_unshared": True,
+                    "private_modules_removed": True,
+                    "reconcile_cache_distinct": True,
+                    "reconcile_cache_unshared": True,
+                    "reconcile_modules_distinct": True,
+                    "subprocess_facades_distinct": True,
+                }
+                or seam["nested_reentry"]
+                != {
+                    "nested_actual": 4,
+                    "nested_attempts": 4,
+                    "nested_status": "accepted",
+                    "outer_actual": 4,
+                    "outer_attempts": 4,
+                    "outer_status": "accepted",
+                }
+            ):
+                raise EvidenceError(
+                    f"{context} nested or cache session isolation changed"
+                )
+            static = seam["static_contract"]
+            require_keys(
+                static,
+                (
+                    "active_reconciler_has_no_default",
+                    "ambient_popen_assignment_absent",
+                    "ambient_run_assignment_absent",
+                    "audit_runner_has_no_default",
+                    "audit_paths_have_no_real_fallback",
+                    "bounded_git_has_no_fixture_launcher",
+                    "classifier_session_has_no_default",
+                    "facade_has_no_ambient_delegate",
+                    "facade_public_surface_closed",
+                    "internal_sessions_have_no_default",
+                    "main_runner_has_no_default", "ordinary_cli_absent",
+                    "public_ordinary_audit_absent",
+                    "public_strategy_surface_u_only",
+                    "pipe_result_publication_bridge",
+                    "repository_session_owns_metrics",
+                    "repository_session_runner_has_no_default",
+                    "reconciler_launch_sites",
+                    "runner_result_publication_bridge",
+                    "spawn_metrics_derived_from_session",
+                    "transaction_wrapper_absent",
+                ),
+                f"{context}.static_contract",
+            )
+            if (
+                any(
+                    value is not True
+                    for key, value in static.items()
+                    if key != "reconciler_launch_sites"
+                )
+                or static["reconciler_launch_sites"]
+                != {"Popen": 2, "run": 65, "total": 67}
+            ):
+                raise EvidenceError(
+                    f"{context} static session boundary changed"
+                )
+            date_replay = seam["fixture_date_replay"]
+            require_keys(
+                date_replay,
+                (
+                    "fixed_date", "opposite_ambient_dates",
+                    "private_modules_removed", "private_modules_unique",
+                    "replays",
+                    "stable_bytes_oid_identity_and_filed_date",
+                ),
+                f"{context}.fixture_date_replay",
+            )
+            if (
+                date_replay["fixed_date"] != "2026-09-02"
+                or date_replay["opposite_ambient_dates"]
+                != ["1999-12-31", "2099-01-01"]
+                or date_replay["private_modules_removed"] is not True
+                or date_replay["private_modules_unique"] is not True
+                or date_replay[
+                    "stable_bytes_oid_identity_and_filed_date"
+                ]
+                is not True
+                or len(date_replay["replays"]) != 2
+            ):
+                raise EvidenceError(
+                    f"{context} immutable fixture date changed"
+                )
+            comparable = []
+            for replay in date_replay["replays"]:
+                require_keys(
+                    replay,
+                    (
+                        "ambient_date", "ambient_date_unchanged",
+                        "bytes_sha256", "filed", "fixed_session_date",
+                        "git_blob_oid", "identity", "path", "payload",
+                    ),
+                    f"{context}.fixture_date_replay.replay",
+                )
+                if (
+                    replay["ambient_date_unchanged"] is not True
+                    or replay["fixed_session_date"] != "2026-09-02"
+                    or not replay["filed"].startswith("2026-09-02")
+                ):
+                    raise EvidenceError(
+                        f"{context} replay used ambient UTC date"
+                    )
+                comparable.append(
+                    {
+                        key: value
+                        for key, value in replay.items()
+                        if key != "ambient_date"
+                    }
+                )
+            if comparable[0] != comparable[1]:
+                raise EvidenceError(
+                    f"{context} fixed-date replay bytes changed"
+                )
+
         elif row["id"] == "leak-object-database-pipes":
             observation = row["observation"]
             require_keys(
                 observation,
                 (
-                    "baseline", "classifier_fallback_closed",
+                    "baseline", "immutable_backing_bypasses_mutable_view",
                     "cancellation_cleanup_completed",
                     "cancellation_cleanup_notes",
                     "cancellation_cleanup_state",
                     "cleanup_failure_closed", "damaged", "kind",
                     "forced_fd_reuse_safe",
                     "metrics_published_after_close",
+                    "pipe_return_publication_observations",
+                    "pipe_return_publication_safe",
+                    "raw_token_observations",
+                    "raw_token_state_machine_safe",
+                    "rollback_failure_safe", "rollback_observations",
+                    "substituted_pipe_observations",
                     "unclosed_descriptor_failed_closed",
                 ),
                 f"{context}.observation",
@@ -3709,18 +4333,6 @@ def validate_manifest(manifest):
                     item, lifecycle_keys,
                     f"{context}.observation.baseline.{mode}",
                 )
-                noncancellation_throw = {
-                    "base-close", "fileno-base-close",
-                    "fileno-runtime-close", "raising-abort",
-                    "raising-close", "runtime-abort",
-                    "runtime-after-close", "runtime-close",
-                }
-                cancellation_throw = {
-                    "fileno-keyboard-close",
-                    "fileno-system-exit-abort",
-                    "keyboard-after-close", "keyboard-close",
-                    "system-exit-abort",
-                }
                 if mode == "stubborn-after-kill":
                     valid_lifecycle = bool(
                         item["process_reaps"] == 0
@@ -3738,23 +4350,10 @@ def validate_manifest(manifest):
                     )
                 else:
                     failures = item["cleanup_failures"]
-                    if mode in noncancellation_throw:
-                        failure_valid = bool(
-                            len(failures) == 1
-                            and "cleanup ended closed" in failures[0]
-                        )
-                    elif mode in cancellation_throw:
-                        expected_type = (
-                            "SystemExit:"
-                            if "system-exit" in mode
-                            else "KeyboardInterrupt:"
-                        )
-                        failure_valid = bool(
-                            len(failures) == 1
-                            and failures[0].startswith(expected_type)
-                        )
-                    else:
-                        failure_valid = not failures
+                    # Every injected object/view callback is untrusted and is
+                    # never invoked.  Cleanup uses the immutable closefd=False
+                    # backing plus the tombstoned raw ownership token.
+                    failure_valid = not failures
                     valid_lifecycle = bool(
                         item["process_reaps"] == 1
                         and item["returncode_is_set"] is True
@@ -3764,19 +4363,178 @@ def validate_manifest(manifest):
                         == int(mode in {"abort", "stubborn-close"})
                         and item["stdin_object_closed"] is True
                         and item["stdout_object_closed"] is True
-                        and set(item["owned_states"].values()) == {"CLOSED"}
+                        and item["owned_states"]["stdout"] == "CLOSED"
+                        and item["owned_states"]["stdin"] == "CLOSED"
                         and item["wrapper_fileno_calls"] == 0
                     )
                 if (
                     item["mode"] != mode
                     or item["stdin_closed"] is not True
                     or item["stdout_closed"] is not True
-                    or set(item["owned_states"].values()) != {"CLOSED"}
+                    or item["owned_states"]["stdout"] != "CLOSED"
+                    or item["owned_states"]["stdin"] != "CLOSED"
                     or item["wrapper_fileno_calls"] != 0
                     or not valid_lifecycle
                 ):
                     raise EvidenceError(
                         f"{context} baseline descriptor closure changed"
+                    )
+            raw_tokens = observation["raw_token_observations"]
+            substituted = observation["substituted_pipe_observations"]
+            require_keys(
+                substituted,
+                ("close-reuse-return", "close-reuse-throw"),
+                f"{context}.observation.substituted_pipe_observations",
+            )
+            for name, item in substituted.items():
+                require_keys(
+                    item,
+                    (
+                        "cleanup_failure", "descriptor_reused",
+                        "owned_state", "repeated_failures",
+                        "replacement_close_calls", "replacement_survived",
+                        "sentinel_created",
+                    ),
+                    f"{context}.observation.substituted_pipe_observations.{name}",
+                )
+                if (
+                    "cleanup ended closed" not in item["cleanup_failure"]
+                    or item["descriptor_reused"] is not True
+                    or item["owned_state"] != "CLOSED"
+                    or item["repeated_failures"]
+                    or item["replacement_close_calls"] != 0
+                    or item["replacement_survived"] is not True
+                    or item["sentinel_created"] is not False
+                ):
+                    raise EvidenceError(
+                        f"{context} substituted pipe {name} gained close authority"
+                    )
+            expected_raw_tokens = {
+                "success": None,
+                "success-reuse": None,
+                "pre-runtime": "RuntimeError",
+                "post-runtime": "RuntimeError",
+                "pre-keyboard": "KeyboardInterrupt",
+                "post-keyboard": "KeyboardInterrupt",
+                "pre-system-exit": "SystemExit",
+                "post-system-exit": "SystemExit",
+            }
+            require_keys(
+                raw_tokens,
+                expected_raw_tokens,
+                f"{context}.observation.raw_token_observations",
+            )
+            raw_token_keys = (
+                "caught", "close_calls", "descriptor_tombstoned",
+                "replacement_bytes", "replacement_survived",
+                "repeated_failures", "state",
+            )
+            for name, expected_throwable in expected_raw_tokens.items():
+                item = raw_tokens[name]
+                require_keys(
+                    item,
+                    raw_token_keys,
+                    f"{context}.observation.raw_token_observations.{name}",
+                )
+                if name in {"success", "success-reuse"}:
+                    valid_raw = item == {
+                        "caught": None,
+                        "close_calls": 1,
+                        "descriptor_tombstoned": True,
+                        "replacement_bytes": (
+                            "before-repeat-after-repeat"
+                            if name == "success-reuse"
+                            else ""
+                        ),
+                        "replacement_survived": (
+                            True if name == "success-reuse" else None
+                        ),
+                        "repeated_failures": [],
+                        "state": "CLOSED",
+                    }
+                else:
+                    valid_raw = bool(
+                        item["caught"] == expected_throwable
+                        and item["close_calls"] == 1
+                        and item["descriptor_tombstoned"] is True
+                        and item["replacement_bytes"]
+                        == "before-repeat-after-repeat"
+                        and item["replacement_survived"] is True
+                        and item["state"] == "UNKNOWN"
+                        and len(item["repeated_failures"]) == 2
+                        and all(
+                            "descriptor state remains unknown" in failure
+                            for failure in item["repeated_failures"]
+                        )
+                    )
+                if not valid_raw:
+                    raise EvidenceError(
+                        f"{context} raw token {name} ownership changed"
+                    )
+            rollbacks = observation["rollback_observations"]
+            require_keys(
+                rollbacks,
+                (
+                    "post-keyboard", "post-runtime",
+                    "post-system-exit", "pre-keyboard", "pre-runtime",
+                    "pre-system-exit",
+                ),
+                f"{context}.observation.rollback_observations",
+            )
+            for name, item in rollbacks.items():
+                require_keys(
+                    item,
+                    (
+                        "caught", "close_calls", "replacement_bytes",
+                        "replacement_survived", "write_end_closed",
+                    ),
+                    f"{context}.observation.rollback_observations.{name}",
+                )
+                if (
+                    item["caught"]
+                    != (
+                        "KeyboardInterrupt"
+                        if name.endswith("keyboard")
+                        else (
+                            "SystemExit"
+                            if name.endswith("system-exit")
+                            else "Unreadable"
+                        )
+                    )
+                    or len(item["close_calls"]) != 2
+                    or item["replacement_bytes"]
+                    != "rollback-survived"
+                    or item["replacement_survived"] is not True
+                    or item["write_end_closed"] is not True
+                ):
+                    raise EvidenceError(
+                        f"{context} setup rollback {name} changed"
+                    )
+            pipe_publication = observation[
+                "pipe_return_publication_observations"
+            ]
+            require_keys(
+                pipe_publication,
+                ("KeyboardInterrupt", "SystemExit"),
+                f"{context}.observation.pipe_return_publication_observations",
+            )
+            for name, item in pipe_publication.items():
+                require_keys(
+                    item,
+                    ("caught", "closed"),
+                    f"{context}.observation.pipe_return_publication_observations.{name}",
+                )
+                require_keys(
+                    item["closed"],
+                    ("read", "write"),
+                    f"{context}.observation.pipe_return_publication_observations.{name}.closed",
+                )
+                if (
+                    item["caught"] != name
+                    or item["closed"] != {"read": True, "write": True}
+                ):
+                    raise EvidenceError(
+                        f"{context} pipe return publication {name} leaked"
                     )
             damaged = observation["damaged"]
             require_keys(
@@ -3796,8 +4554,13 @@ def validate_manifest(manifest):
                 or damaged["stdout_object_closed"] is not False
                 or set(damaged["owned_states"].values()) != {"OPEN"}
                 or damaged["wrapper_fileno_calls"] != 0
-                or observation["classifier_fallback_closed"] is not True
+                or observation[
+                    "immutable_backing_bypasses_mutable_view"
+                ] is not True
                 or observation["forced_fd_reuse_safe"] is not True
+                or observation["raw_token_state_machine_safe"] is not True
+                or observation["rollback_failure_safe"] is not True
+                or observation["pipe_return_publication_safe"] is not True
                 or observation["cancellation_cleanup_completed"] is not True
                 or observation["cancellation_cleanup_notes"]
                 != [
@@ -4955,7 +5718,7 @@ def render_readme(manifest):
         f"Canonical evidence artifact: `{evidence_sha}`.",
         f"Canonical semantic stream: `{summary['canonical_stream_sha256']}`.",
         "The raw JSONL stream is ephemeral and has no stored hash claim.",
-        f"Evidence schemas v2 at commit `{core['evidence_supersession']['artifacts'][0]['commit']}`, v3 at commit `{core['evidence_supersession']['artifacts'][1]['commit']}`, v4 at commit `{core['evidence_supersession']['artifacts'][2]['commit']}`, v5 at commit `{core['evidence_supersession']['artifacts'][3]['commit']}`, v6 at commit `{core['evidence_supersession']['artifacts'][4]['commit']}`, v7 at commit `{core['evidence_supersession']['artifacts'][5]['commit']}`, v8 at commit `{core['evidence_supersession']['artifacts'][6]['commit']}`, v9 at commit `{core['evidence_supersession']['artifacts'][7]['commit']}`, and v10 at commit `{core['evidence_supersession']['artifacts'][8]['commit']}` are superseded and burned by their later blockers; all histories are preserved, no identifier is reused, and this artifact closes `{core['evidence_supersession']['replacement_schema']}`.",
+        f"Evidence schemas v2 at commit `{core['evidence_supersession']['artifacts'][0]['commit']}`, v3 at commit `{core['evidence_supersession']['artifacts'][1]['commit']}`, v4 at commit `{core['evidence_supersession']['artifacts'][2]['commit']}`, v5 at commit `{core['evidence_supersession']['artifacts'][3]['commit']}`, v6 at commit `{core['evidence_supersession']['artifacts'][4]['commit']}`, v7 at commit `{core['evidence_supersession']['artifacts'][5]['commit']}`, v8 at commit `{core['evidence_supersession']['artifacts'][6]['commit']}`, v9 at commit `{core['evidence_supersession']['artifacts'][7]['commit']}`, v10 at commit `{core['evidence_supersession']['artifacts'][8]['commit']}`, and v11 at commit `{core['evidence_supersession']['artifacts'][9]['commit']}` are superseded and burned by their later blockers; all histories are preserved, no identifier is reused, and this artifact closes `{core['evidence_supersession']['replacement_schema']}`.",
         f"The execution-bound runtime landed in commits `{bounds['runtime_milestone_commits'][0]}` and `{bounds['runtime_milestone_commits'][1]}`; the latter binds literal refusal at the 68th parent token.", "",
         "## Contract exercised", "",
         "The classifier accepts exactly two immutable inputs, old tip `O` and new tip",
@@ -5001,27 +5764,42 @@ def render_readme(manifest):
         "`prototype.py --repo ROOT --event-kind KIND --event-payload EVENT.json`.",
         "Exits 0, 1, and 2 mean clean, blocking, and coverage-unavailable. Importers",
         "use `event_endpoints(event_kind, payload)` and typed-U-only",
-        "`audit_event(root, event_kind, payload, *, budget_limit=None, transaction=None)`.",
-        "A valid event calls the optional transaction seam once around",
-        "the complete Git-backed audit. Its context may yield a `GitSpawnObserver`;",
+        "`audit_event(root, event_kind, payload, *, git_runner, budget_limit=None, transaction=None)`.",
+        "The required keyword-only `git_runner` has no default, `None`, ambient, or",
+        "process-global fallback. There is no advertised ordinary O/N CLI and no",
+        "selectable non-U production route.",
+        "Each valid audit creates a private `RepositorySession` that owns its resolved",
+        "root, metrics, observer, children, descriptors, object database and caches,",
+        "carry-proof cache, and uniquely named reconciler module. The reconciler's",
+        "repository roots, mutable caches, persistent readers, active transition state,",
+        f"and date are session-local; retry rendering is pinned to `{core['evidence_generation']['fixture_date']}`.",
+        "Its closed module-local subprocess facade exposes only Git `run`/`Popen` and",
+        "routes every imported child through the injected runner. It never patches or",
+        "delegates to the process-global `subprocess.Popen`.",
+        "A valid event calls the optional transaction seam once around the complete",
+        "Git-backed audit and its resource cleanup. Its context may yield a `GitSpawnObserver`;",
         "production calls `before_spawn(exact_command)` before creating every Git",
         "child and `after_spawn(exact_command, pid)` afterward. Thus an external",
         "evaluator precharges every attempt while `git_processes` counts only children",
-        "actually created and delivered to `after_spawn`; a failed factory therefore",
-        "records one monotonic attempt and zero children. Callback throwables clean up",
+        "actually created and delivered to `after_spawn`. Factory/entry failures create",
+        "no attempts; launch or callback throwables retain exact attempt/actual/before/after",
+        "counts. Callback throwables clean up",
         "the child before returning unreadable or re-raising cancellation, and attach a",
-        "stable cleanup-failure note if cancellation cleanup cannot be proven. The trusted",
-        "spawn primitive ignores and cannot re-enter through ambient Popen wrappers.",
-        "A process-local nonblocking single-flight gate covers the transaction, imported",
-        "reconciler globals, compatibility Popen wrapper, cleanup, metric snapshot, and",
-        "exact restoration. Concurrent and same-thread nested valid calls return typed",
-        "`audit-busy` with zero transaction entries, attempts, children, or callbacks;",
-        "invalid input refuses before this gate. The compatibility wrapper charges only",
-        "its invocation token, so unrelated threads delegate to the saved ambient factory.",
-        "Exact restoration assumes every process-global Popen writer participates. This is",
-        "a legacy-helper POC boundary, not the final architecture: Strategy A production",
-        "code must inject a required keyword-only trusted Git runner and give each audit a",
-        "private RepositorySession, with no ambient or default runner fallback. The caller receives neither",
+        "stable cleanup-failure note if cancellation cleanup cannot be proven. Session",
+        "cleanup finishes while the transaction remains active; `__exit__` is called once",
+        "after cleanup, cannot suppress the audit result, and final metrics are taken after",
+        "exit. Non-cancellation factory/enter/exit failures are typed unreadable, while",
+        "cancellation is deferred until independent cleanup and the permitted exit call finish.",
+        "Deterministic cancellation at the first line after reconciler load, after the",
+        "session ContextVar changes, after the runner result is published, after its local",
+        "binding, after pipe attachment,",
+        "after transaction entry, and before transaction exit leaves no private module,",
+        "child, or descriptor behind. The caller context manager is entered and exited",
+        "directly; no Python wrapper adds a delegate-entry or delegate-exit gap.",
+        "Concurrent and nested sessions, including duplicate prototype imports sharing one",
+        "immutable runner, remain isolated for the same or different repository roots; all",
+        "private module names are removed on cleanup and ambient Popen identity is unchanged.",
+        "The caller receives neither",
         "the operation nor its result, so O/N, Strategy U, and classification remain",
         "owned by the audit. Local, pre-push, push, and PR",
         "synchronize each run a real non-fast-forward clean restack and genuine blocking",
@@ -5089,30 +5867,44 @@ def render_readme(manifest):
         "damage probes preserve output sentinels. Both output files and their old backups",
         "are staged and fsynced before a canonical same-directory recovery journal is",
         "published and directory-fsynced. A directory-inode lock serializes publishers;",
-        "a concurrent publisher refuses before staging. An ordinary late failure restores",
+        "a concurrent publisher refuses before staging. Cancellation immediately after",
+        "the directory fd is published or immediately before close releases the lock, and",
+        "a following publisher reacquires it. An ordinary late failure restores",
         "the old pair. If that recovery also persistently fails, the journal and verified",
         "regular-file backups remain, every invocation refuses or restores the old pair",
         "before generating, and a later successful invocation recovers deterministically.",
         "Forged traversal names, malformed digests, symlink journals/backups, and symlink",
-        "targets are never accepted as recovery authority. Before any new staging or journal",
-        "creation, both existing targets must pass `lstat` as non-symlink regular files and",
-        f"a bounded no-follow read of at most {MAX_EXISTING_ARTIFACT_BYTES} bytes; FIFO, device, directory,",
-        "symlink, race-changed, and oversized targets refuse without touching the other target.",
+        "targets are never accepted as recovery authority. One bounded descriptor reader",
+        "uses required `O_NONBLOCK|O_NOFOLLOW|O_CLOEXEC`, compares lstat/pre-fstat/post-fstat",
+        "type, device, inode, size, mtime_ns, and ctime_ns, and reads no more than limit+1",
+        f"bytes. Artifacts/backups use a {MAX_EXISTING_ARTIFACT_BYTES}-byte cap; journals use",
+        f"the separate {MAX_PAIR_JOURNAL_BYTES}-byte cap. Exact-limit files pass; plus-one, FIFO, device,",
+        "directory, symlink, lstat/open replacement, growth, shrinkage, and same-inode/same-size",
+        "mutation refuse. Bytes become visible only after the one raw descriptor close succeeds.",
+        "Recovery stages verified backup bytes to a distinct restore file, preserves the sole",
+        "backup until the restored target validates, and validates both newly published targets",
+        "against intended bytes before deleting the journal.",
         "Portable filesystems still",
         "cannot atomically exchange two paths: a process or machine crash may expose a",
         "temporary mixed namespace, but the fsynced journal keeps it non-authoritative and",
         "recoverable on the next invocation. This does not claim atomic pair visibility or",
-        "survival of storage loss/corruption beyond the filesystem's fsync guarantees.", "",
-        "Every production `PIPE` is created explicitly with one raw parent-fd ownership",
-        "token before Popen and exposed through a non-owning Python view. Cleanup consumes",
-        "OPEN to RETIRING exactly once, makes one raw close attempt, and ends CLOSED or",
-        "UNKNOWN; it never re-queries a wrapper or retries an unknown token, so later fd",
+        "survival of storage loss/corruption beyond the filesystem's fsync guarantees. The",
+        "lock pins and serializes one directory inode, but pathname operations are not yet",
+        "dirfd-relative; hostile replacement of the parent directory during publication is",
+        "explicitly outside this POC's claim.", "",
+        "Every production `PIPE` pair is published into a construction registry before",
+        "Python regains control, converted to one raw parent-fd ownership token before",
+        "Popen, and exposed through a non-owning Python view. Immediately before",
+        "the sole raw close call, cleanup tombstones the numeric descriptor and changes OPEN",
+        "to durable UNKNOWN; only a normal return upgrades it to CLOSED. Every throwable is",
+        "therefore ambiguous and fail-closed; cleanup never retries an UNKNOWN token, so later fd",
         "reuse cannot be closed by a stale object. The object database closes stdin and",
         "stdout on success, abort, an already-exited child, and a stubborn child that",
-        "requires timeout then kill. If an object wrapper raises before closing, the raw owned",
-        "descriptor is closed, but the audit still returns unreadable. A",
-        "wrapper that closes first and then throws is also propagated after verified",
-        "cleanup; cancellation is never swallowed. An",
+        "requires timeout then kill. Public process replacements and mutations of the",
+        "non-owning view are never granted a close callback; cleanup uses its immutable",
+        "closefd-false backing reference only after the raw token is consumed. A raw closer",
+        "that closes first and then throws is propagated as UNKNOWN, never claimed as",
+        "verified cleanup; cancellation is never swallowed. An",
         "unclosable descriptor likewise fails closed with no action. Even an unproved",
         "post-kill reap closes both descriptors and returns unreadable without recording",
         "a false reap. Repeated close or abort is idempotent, and published metrics are",
@@ -5206,12 +5998,12 @@ def render_readme(manifest):
               f"PCX-19 is replay-bound by `{p19['record_sha256']}`. One ObjectDatabase reader observes a missing blob without caching the miss, the object is restored, the same reader/process succeeds, and a third read hits its positive cache.", "",
               "## Reproducible audit", "",
               "Use two fresh, empty scratch roots:", "", "```sh",
-              "PYTHONHASHSEED=1 LC_ALL=C LANG=C TZ=UTC PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-r22-v11-seed1 > /tmp/production-contract-r22-v11-seed1.jsonl",
-              "PYTHONHASHSEED=777 LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 TZ=America/Los_Angeles PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --reverse-construction --fixtures-dir /tmp/production-contract-r22-v11-seed777 > /tmp/production-contract-r22-v11-seed777.jsonl",
-              "python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r22-v11-seed1.jsonl --compare /tmp/production-contract-r22-v11-seed777.jsonl",
-              "python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r22-v11-seed1.jsonl --damage-test",
-              "python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r22-v11-seed1.jsonl --generate",
-              "python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --repo /path/to/repo --old FULL_OID_O --new FULL_OID_N --origin-strategy U",
+              "PYTHONHASHSEED=1 LC_ALL=C LANG=C TZ=UTC PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-r25-v12-seed1 > /tmp/production-contract-r25-v12-seed1.jsonl",
+              "PYTHONHASHSEED=777 LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 TZ=America/Los_Angeles PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --reverse-construction --fixtures-dir /tmp/production-contract-r25-v12-seed777 > /tmp/production-contract-r25-v12-seed777.jsonl",
+              "python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r25-v12-seed1.jsonl --compare /tmp/production-contract-r25-v12-seed777.jsonl",
+              "python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r25-v12-seed1.jsonl --damage-test",
+              "python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r25-v12-seed1.jsonl --compare /tmp/production-contract-r25-v12-seed777.jsonl --generate",
+              "python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --repo /path/to/repo --event-kind push --event-payload /path/to/event.json",
               "python3 -m py_compile docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py",
               "python3 automation/run_tests.py", "python3 automation/reconcile/reconcile.py --check", "```", "",
               "The auditor requires a fresh internal replay and raw byte equality before generation, rejects",
@@ -5233,6 +6025,8 @@ def render_readme(manifest):
               "- Certificates intentionally overbind non-action authority delta and referenced paths until production exposes a validator-owned support receipt.",
               "- Review successor/reask and boundary-review supplier leaves fail closed rather than simulate semantics.",
               "- The one-pass claim excludes imported production parent queries; production integration must cache/eliminate them.",
+              "- Uncatchable process termination and native failure inside a resource-creating syscall are outside this Python POC; Python-level `KeyboardInterrupt`/`SystemExit` after resource return is covered by pre-bytecode ownership publication.",
+              "- Hostile replacement of the artifact parent directory inode during publication is excluded until every pathname operation is dirfd-relative.",
               "- PCX-21/22 remain production-integration gates, not isolated-POC completion claims.", "",
               "## Tests not represented by this artifact", "",
               "This artifact does not claim deployment, a real remote push, production",
@@ -5558,6 +6352,17 @@ def damage_matrix(expected, stream):
         ][4].update(commit="0" * 40),
         "evidence schema supersession changed",
     )
+    for superseded_index, superseded_version in enumerate(
+        range(7, 12), start=5
+    ):
+        manifest_case(
+            f"superseded-v{superseded_version}-commit-erased",
+            lambda d, index=superseded_index: d["core_claims"]
+            ["evidence_supersession"]["artifacts"][index].update(
+                commit="0" * 40
+            ),
+            "evidence schema supersession changed",
+        )
     manifest_case(
         "fresh-generation-caller-authoritative",
         lambda d: d["core_claims"]["evidence_generation"].update(
@@ -5578,19 +6383,19 @@ def damage_matrix(expected, stream):
         "event-invalid-invokes-transaction",
         lambda d: d["core_claims"]["immutable_event_workflows"][
             "cli_control"
-        ]["observation"]["execution_seam"]["invalid"].update(
-            transaction_entries=1
+        ]["observation"]["execution_seam"]["invalid"]["lifecycle"].update(
+            factory=1
         ),
-        "execution seam escaped accounting",
+        "invalid entered execution",
     )
     manifest_case(
         "event-valid-observer-misses-child",
         lambda d: d["core_claims"]["immutable_event_workflows"][
             "cli_control"
         ]["observation"]["execution_seam"]["valid"].update(
-            after_spawns=3
+            after=3
         ),
-        "execution seam escaped accounting",
+        "valid audit escaped session accounting",
     )
     manifest_case(
         "descriptor-after-exit-leak",
@@ -5603,7 +6408,7 @@ def damage_matrix(expected, stream):
         "descriptor-wrapper-recovery-misreported-clean",
         lambda d: d["core_claims"]["object_database_lifecycle"][
             "observation"
-        ].update(classifier_fallback_closed=False),
+        ].update(immutable_backing_bypasses_mutable_view=False),
         "object database lifecycle projection changed",
     )
     manifest_case(
@@ -6195,8 +7000,20 @@ def damage_matrix(expected, stream):
         finally:
             os.replace = real_replace
         journal_retained = journal_path.is_file()
+        retained_journal_record = (
+            read_bounded_regular(
+                journal_path,
+                "retained artifact pair recovery journal",
+                MAX_PAIR_JOURNAL_BYTES,
+                False,
+            )
+            if journal_retained
+            else None
+        )
         retained_journal = (
-            load_json(journal_path.read_bytes()) if journal_retained else {}
+            load_json(retained_journal_record[0])
+            if retained_journal_record is not None
+            else {}
         )
         retained_backups = bool(
             journal_retained
@@ -6495,6 +7312,89 @@ def damage_matrix(expected, stream):
         readme_path = output_root / "README.md"
         evidence_path.write_bytes(b"OLD-EVIDENCE\n")
         readme_path.write_bytes(b"OLD-README\n")
+        staging_cancellation_observations = {}
+        for cancellation_type in (KeyboardInterrupt, SystemExit):
+            caught = None
+            captured_descriptor = None
+
+            def cancel_staging_boundary(
+                stage, _path, descriptor, exception=cancellation_type
+            ):
+                nonlocal captured_descriptor
+                if stage == "after-mkstemp-publication":
+                    captured_descriptor = descriptor
+                    raise exception(
+                        "injected staging-file publication cancellation"
+                    )
+
+            try:
+                stage_artifact_bytes(
+                    output_root / "cancel-target",
+                    b"CANCELLED-STAGE\n",
+                    cancellation_type.__name__,
+                    checkpoint=cancel_staging_boundary,
+                )
+            except BaseException as error:
+                caught = type(error).__name__
+            descriptor_closed = False
+            if captured_descriptor is not None:
+                try:
+                    os.fstat(captured_descriptor)
+                except OSError as error:
+                    descriptor_closed = error.errno == errno.EBADF
+            staging_free = {
+                path.name for path in output_root.iterdir()
+            } == {"evidence.json", "README.md"}
+            staging_cancellation_observations[cancellation_type.__name__] = {
+                "caught": caught,
+                "descriptor_closed": descriptor_closed,
+                "staging_free": staging_free,
+            }
+        staging_cancellation_safe = all(
+            item
+            == {
+                "caught": name,
+                "descriptor_closed": True,
+                "staging_free": True,
+            }
+            for name, item in staging_cancellation_observations.items()
+        )
+        lock_cancellation_observations = {}
+        for cancellation_stage in (
+            "after-open-publication",
+            "before-close",
+        ):
+            caught = None
+
+            def cancel_lock_boundary(
+                stage, _descriptor, target=cancellation_stage
+            ):
+                if stage == target:
+                    raise KeyboardInterrupt(
+                        "injected publication lock cancellation"
+                    )
+
+            try:
+                with artifact_pair_publication_lock(
+                    output_root, checkpoint=cancel_lock_boundary
+                ):
+                    pass
+            except BaseException as error:
+                caught = type(error).__name__
+            reacquired = False
+            try:
+                with artifact_pair_publication_lock(output_root):
+                    reacquired = True
+            except EvidenceError:
+                pass
+            lock_cancellation_observations[cancellation_stage] = {
+                "caught": caught,
+                "reacquired": reacquired,
+            }
+        lock_cancellation_safe = all(
+            item == {"caught": "KeyboardInterrupt", "reacquired": True}
+            for item in lock_cancellation_observations.values()
+        )
         concurrent_failure = None
         with artifact_pair_publication_lock(output_root):
             try:
@@ -6527,6 +7427,14 @@ def damage_matrix(expected, stream):
             "damage": "concurrent-artifact-pair-publisher",
             "expected_failure": "artifact pair generation already active",
             "observed_failure": concurrent_failure,
+            "lock_cancellation_observations": (
+                lock_cancellation_observations
+            ),
+            "lock_cancellation_safe": lock_cancellation_safe,
+            "staging_cancellation_observations": (
+                staging_cancellation_observations
+            ),
+            "staging_cancellation_safe": staging_cancellation_safe,
             "refused_pair_unchanged": refused_pair_unchanged,
             "serialized_pair_published": serialized_pair_published,
             "status": (
@@ -6534,6 +7442,8 @@ def damage_matrix(expected, stream):
                 if concurrent_failure is not None
                 and "artifact pair generation already active"
                 in concurrent_failure
+                and lock_cancellation_safe
+                and staging_cancellation_safe
                 and refused_pair_unchanged
                 and serialized_pair_published
                 else "FALSE_GREEN"
@@ -6632,8 +7542,11 @@ def damage_matrix(expected, stream):
 
     device_failure = None
     try:
-        read_existing_artifact_bounded(
-            Path(os.devnull), "existing artifact target device"
+        read_bounded_regular(
+            Path(os.devnull),
+            "existing artifact target device",
+            MAX_EXISTING_ARTIFACT_BYTES,
+            False,
         )
     except EvidenceError as error:
         device_failure = str(error)
@@ -6651,6 +7564,146 @@ def damage_matrix(expected, stream):
             ),
         }
     )
+
+    # Exercise the one bounded descriptor reader directly.  The same helper is
+    # used for journals, ordinary artifacts, backups, restored targets, and
+    # final published-artifact verification, so each role repeats the complete
+    # hostile identity/type matrix rather than relying on one representative.
+    reader_stages = (
+        "after-lstat",
+        "after-open",
+        "after-pre-fstat",
+        "after-first-chunk",
+        "before-post-fstat",
+    )
+
+    def bounded_reader_probe(role, variant):
+        limit = 8
+        observed_failure = None
+        observed_payload = None
+        stage_counts = {stage: 0 for stage in reader_stages}
+        mutation_stage = {
+            "lstat-open-swap": "after-lstat",
+            "growth": "after-pre-fstat",
+            "shrink": "after-pre-fstat",
+            "same-inode-same-size-mutation": "after-first-chunk",
+        }.get(variant)
+        with tempfile.TemporaryDirectory(
+            prefix=f"production-contract-{role}-{variant}-reader-"
+        ) as raw:
+            directory = Path(raw)
+            target = directory / f"{role}.dat"
+            sentinel = directory / "sentinel.dat"
+            sentinel.write_bytes(b"SENTINEL")
+            if variant == "exact-limit":
+                target.write_bytes(b"12345678")
+            elif variant == "plus-one":
+                target.write_bytes(b"123456789")
+            elif variant == "symlink":
+                target.symlink_to(sentinel)
+            elif variant == "fifo":
+                os.mkfifo(target)
+            elif variant == "directory":
+                target.mkdir()
+            elif variant == "device":
+                target = Path(os.devnull)
+            elif variant == "growth":
+                target.write_bytes(b"1234")
+            else:
+                target.write_bytes(b"12345678")
+
+            def checkpoint(stage, checked_target, _descriptor):
+                stage_counts[stage] += 1
+                if stage != mutation_stage or stage_counts[stage] != 1:
+                    return
+                if variant == "lstat-open-swap":
+                    replacement = directory / "replacement.dat"
+                    replacement.write_bytes(b"ABCDEFGH")
+                    os.replace(replacement, checked_target)
+                elif variant == "growth":
+                    write_descriptor = os.open(checked_target, os.O_WRONLY)
+                    try:
+                        os.lseek(write_descriptor, 0, os.SEEK_END)
+                        os.write(write_descriptor, b"56789")
+                    finally:
+                        os.close(write_descriptor)
+                elif variant == "shrink":
+                    write_descriptor = os.open(checked_target, os.O_WRONLY)
+                    try:
+                        os.ftruncate(write_descriptor, 3)
+                    finally:
+                        os.close(write_descriptor)
+                elif variant == "same-inode-same-size-mutation":
+                    original = checked_target.stat()
+                    write_descriptor = os.open(checked_target, os.O_WRONLY)
+                    try:
+                        os.pwrite(write_descriptor, b"ABCDEFGH", 0)
+                    finally:
+                        os.close(write_descriptor)
+                    os.utime(
+                        checked_target,
+                        ns=(original.st_atime_ns, original.st_mtime_ns),
+                    )
+
+            try:
+                record = read_bounded_regular(
+                    target,
+                    f"{role} reader probe",
+                    limit,
+                    False,
+                    checkpoint=checkpoint,
+                )
+                observed_payload = record[0]
+            except EvidenceError as error:
+                observed_failure = str(error)
+            sentinel_unchanged = sentinel.read_bytes() == b"SENTINEL"
+
+        exact = variant == "exact-limit"
+        expected_stages = all(
+            stage_counts[stage] == 1 for stage in reader_stages
+        )
+        mutation_fired = (
+            mutation_stage is None or stage_counts[mutation_stage] == 1
+        )
+        rejected = observed_failure is not None
+        passed = (
+            observed_failure is None
+            and observed_payload == b"12345678"
+            and expected_stages
+            if exact
+            else rejected and mutation_fired
+        )
+        results.append(
+            {
+                "damage": f"bounded-reader-{role}-{variant}",
+                "expected_failure": (
+                    None if exact else "bounded reader refusal"
+                ),
+                "observed_failure": observed_failure,
+                "hook_counts": stage_counts,
+                "mutation_hook_fired_once": mutation_fired,
+                "sentinel_unchanged": sentinel_unchanged,
+                "status": "OBSERVED_RED" if passed else "FALSE_GREEN",
+            }
+        )
+
+    for reader_role in (
+        "journal", "artifact", "backup", "restored-target"
+    ):
+        for reader_variant in (
+            "exact-limit",
+            "plus-one",
+            "symlink",
+            "fifo",
+            "directory",
+            "device",
+            "lstat-open-swap",
+            "growth",
+            "shrink",
+            "same-inode-same-size-mutation",
+        ):
+            bounded_reader_probe(reader_role, reader_variant)
+
     return {"audit_damage": "PASS" if all(x["status"] == "OBSERVED_RED" for x in results) else "FAIL",
             "cases": results, "observed_red": sum(x["status"] == "OBSERVED_RED" for x in results), "total": len(results)}
 
@@ -6700,7 +7753,21 @@ def main(argv=None):
                 args.readme,
                 comparison=second,
             )
-        failures = audit_artifacts(args.evidence.read_bytes(), args.readme.read_bytes(), expected)
+        evidence_record = read_bounded_regular(
+            args.evidence,
+            "final evidence artifact",
+            MAX_EXISTING_ARTIFACT_BYTES,
+            False,
+        )
+        readme_record = read_bounded_regular(
+            args.readme,
+            "final README artifact",
+            MAX_EXISTING_ARTIFACT_BYTES,
+            False,
+        )
+        failures = audit_artifacts(
+            evidence_record[0], readme_record[0], expected
+        )
         comparison = None
         if second is not None:
             second_manifest = manifest_from_stream(second)
