@@ -27,7 +27,7 @@ import tempfile
 from typing import Any
 
 
-SCHEMA = "agentfold-production-contract-evidence/v13"
+SCHEMA = "agentfold-production-contract-evidence/v14"
 SUPERSEDED_EVIDENCE = {
     "artifacts": [
         {
@@ -132,6 +132,15 @@ SUPERSEDED_EVIDENCE = {
                 "preserved and v12 is never reused"
             ),
             "schema": "agentfold-production-contract-evidence/v12",
+        },
+        {
+            "commit": "7844eeb5ed4a4534eafd6c7c7b06f2c05b35e6f7",
+            "disposition": (
+                "superseded and burned after blocking exit-1 accounting "
+                "and public Strategy B selection-surface blockers; history "
+                "is preserved and v13 is never reused"
+            ),
+            "schema": "agentfold-production-contract-evidence/v13",
         },
     ],
     "replacement_schema": SCHEMA,
@@ -747,9 +756,9 @@ FIXTURE_CLAIMS = (
 )
 
 
-# Generated from a byte-identical forward/reverse v13 pair. Every row kind has
+# Generated from a byte-identical forward/reverse v14 pair. Every row kind has
 # one exact recursive shape digest, checked before any projection.
-RAW_SHAPE_CATALOG_V13 = """
+RAW_SHAPE_CATALOG_V14 = """
 scenario:P1-direct-linear-valid sha256:3f69e6eb45b0e39682e27340f52f906139997a9ddcde927478e17a9239b6d8e4
 scenario:P10-direct-invalid-parent sha256:b188bdde0c472555a55ccba6a06e6c5dd562240bb94d5056aad98d6405595122
 scenario:P11-direct-three-parent-valid sha256:15b54ce5edfc83f16f307df8bba037da1cb471246757eb9ad33f93e8dd8cc001
@@ -984,7 +993,7 @@ aliases sha256:539a8708aebdaa2816ceb01ed2e091a849972b69700c444eeec8e566eaa9eed3
 control:broad-review-pending-normalization sha256:4d55407e4a51e86c40626e007d59ef9c33330a0f865fa8eee3fc5e490525b414
 control:buffered-graph-output sha256:a5c9687fc28f115ffb25a46739950c0bff58f1297ed55d7d953845957b91b5d5
 control:endpoint-only-origin-equality sha256:71d2d9785c27add943a10650d72555da7af8ff0a38e127d8c3c2c1f6c9b70bc2
-control:event-adapter-cli-entrypoint sha256:1e054af68b87ccb8a2a41e8534e37124819d00ddbae1f5465154cb98a515e286
+control:event-adapter-cli-entrypoint sha256:8c1472a6b234d267a2d7de1a0d05bdc2018ce8211371fdcda01c21f07b2125d1
 control:first-parent-carry-proof sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
 control:identity-multiplicity-collapsed-to-set sha256:1ac1b79c19942df728cefbeb0153aeb8b42f07ceffc5343fd5981b03e6048190
 control:ignore-absent-C-arm sha256:2bb8d20021633274e28d6f0f50b220f5cf51f178b5a23154193f49719b1ca7b4
@@ -1026,7 +1035,7 @@ summary sha256:b957b61b2a27224040772a4629d78ad28a6877450d639808664ac078929a351e
 """
 RAW_SHAPE_SHA256 = dict(
     line.split(" ", 1)
-    for line in RAW_SHAPE_CATALOG_V13.splitlines()
+    for line in RAW_SHAPE_CATALOG_V14.splitlines()
     if " " in line
 )
 
@@ -3689,10 +3698,19 @@ def validate_manifest(manifest):
                     item,
                     (
                         "adapter_status", "classification", "exit",
-                        "stdout_canonical", "typed_origin_strategy",
-                        "typed_results_equal",
+                        "cli_bytes_sha256", "import_bytes_sha256",
+                        "import_cli_bytes_equal", "stdout_canonical",
+                        "typed_origin_strategy", "typed_results_equal",
                     ),
                     f"{context}.observation.cases.{name}",
+                )
+                require_digest(
+                    item["cli_bytes_sha256"],
+                    f"{context}.observation.cases.{name}.cli_bytes_sha256",
+                )
+                require_digest(
+                    item["import_bytes_sha256"],
+                    f"{context}.observation.cases.{name}.import_bytes_sha256",
                 )
                 if (
                     (
@@ -3702,6 +3720,9 @@ def validate_manifest(manifest):
                     )
                     != expected_cases[name]
                     or item["stdout_canonical"] is not True
+                    or item["import_cli_bytes_equal"] is not True
+                    or item["cli_bytes_sha256"]
+                    != item["import_bytes_sha256"]
                     or item["typed_origin_strategy"] != "U"
                     or item["typed_results_equal"] is not True
                 ):
@@ -3731,7 +3752,7 @@ def validate_manifest(manifest):
                 (
                     "cache_isolation", "duplicate_module_concurrency",
                     "fixture_date_replay", "hostile_ambient_subprocess",
-                    "identical_endpoint_rejections", "invalid",
+                    "identical_endpoint_rejections", "invalid", "blocking",
                     "invalid_budget_rejections", "invalid_runtime_inputs",
                     "nested_reentry", "noncallable_runner",
                     "observer_throwables", "runner_cancellation",
@@ -3747,13 +3768,15 @@ def validate_manifest(manifest):
                 f"{context}.execution_seam",
             )
             probe_keys = (
-                "adapter_status", "after", "all_pids_reaped",
+                "actual", "adapter_status", "after", "all_pids_reaped",
                 "all_runner_pids_reaped",
                 "attempts", "audit_exit", "before",
-                "canonical_json_serializable", "caught", "classification",
+                "cache_state", "canonical_json_serializable", "caught",
+                "classification",
                 "commands_match", "created", "fd_delta", "lifecycle",
-                "private_modules_leaked", "projected_event_kind", "reason",
-                "runner_calls", "runner_created",
+                "observation_order", "private_modules_leaked",
+                "projected_event_kind", "reason", "runner_calls",
+                "runner_created",
                 "typed_origin_strategy",
             )
 
@@ -3770,9 +3793,42 @@ def validate_manifest(manifest):
                     ),
                     f"{context}.execution_seam.{name}.lifecycle",
                 )
+                require_keys(
+                    item["cache_state"],
+                    (
+                        "active_reconciler_restored",
+                        "carry_cache_entries",
+                        "object_databases_detached", "owners",
+                        "owners_closed", "pipe_registries_empty",
+                        "process_registries_empty",
+                        "reconciler_modules_detached",
+                    ),
+                    f"{context}.execution_seam.{name}.cache_state",
+                )
                 if item["private_modules_leaked"]:
                     raise EvidenceError(
                         f"{context} {name} leaked private reconciler modules"
+                    )
+                cache_state = item["cache_state"]
+                require_nonnegative_int(
+                    cache_state["owners"],
+                    f"{context}.execution_seam.{name}.cache_state.owners",
+                )
+                if (
+                    cache_state["carry_cache_entries"] != 0
+                    or any(
+                        cache_state[key] is not True
+                        for key in (
+                            "active_reconciler_restored",
+                            "object_databases_detached", "owners_closed",
+                            "pipe_registries_empty",
+                            "process_registries_empty",
+                            "reconciler_modules_detached",
+                        )
+                    )
+                ):
+                    raise EvidenceError(
+                        f"{context} {name} leaked session cache state"
                     )
 
             valid = seam["valid"]
@@ -3782,7 +3838,8 @@ def validate_manifest(manifest):
                 or valid["audit_exit"] != 0
                 or valid["classification"] != "no-finding"
                 or valid["created"] <= 0
-                or valid["attempts"] != valid["created"]
+                or valid["attempts"] != valid["actual"]
+                or valid["actual"] != valid["created"]
                 or valid["before"] != valid["created"]
                 or valid["after"] != valid["created"]
                 or valid["runner_calls"] != valid["created"]
@@ -3792,6 +3849,12 @@ def validate_manifest(manifest):
                 or valid["all_runner_pids_reaped"] is not True
                 or valid["canonical_json_serializable"] is not True
                 or valid["fd_delta"] != 0
+                or valid["cache_state"]["owners"] != 1
+                or valid["observation_order"]
+                != [
+                    "transaction-factory", "transaction-enter",
+                    "transaction-exit", "audit-returned", "metrics-read",
+                ]
                 or valid["projected_event_kind"] != "push"
                 or valid["typed_origin_strategy"] != "U"
                 or valid["lifecycle"]
@@ -3805,6 +3868,75 @@ def validate_manifest(manifest):
             ):
                 raise EvidenceError(
                     f"{context} valid audit escaped session accounting"
+                )
+
+            blocking = seam["blocking"]
+            require_keys(
+                blocking,
+                (*probe_keys, "cli_import_byte_parity"),
+                f"{context}.execution_seam.blocking",
+            )
+            validate_probe("blocking", {
+                key: blocking[key] for key in probe_keys
+            })
+            parity = blocking["cli_import_byte_parity"]
+            require_keys(
+                parity, ("bytes_equal", "cli_sha256", "import_sha256"),
+                f"{context}.execution_seam.blocking.cli_import_byte_parity",
+            )
+            require_digest(
+                parity["cli_sha256"],
+                f"{context}.execution_seam.blocking.cli_sha256",
+            )
+            require_digest(
+                parity["import_sha256"],
+                f"{context}.execution_seam.blocking.import_sha256",
+            )
+            blocking_count = blocking["attempts"]
+            if (
+                blocking["adapter_status"] != "accepted"
+                or blocking["audit_exit"] != 1
+                or blocking["classification"] != "blocking-finding"
+                or type(blocking_count) is not int
+                or blocking_count <= 0
+                or any(
+                    blocking[name] != blocking_count
+                    for name in (
+                        "actual", "created", "before", "after",
+                        "runner_calls", "runner_created",
+                    )
+                )
+                or blocking["commands_match"] is not True
+                or blocking["all_pids_reaped"] is not True
+                or blocking["all_runner_pids_reaped"] is not True
+                or blocking["canonical_json_serializable"] is not True
+                or blocking["fd_delta"] != 0
+                or blocking["cache_state"]["owners"] != 1
+                or blocking["private_modules_leaked"]
+                or blocking["projected_event_kind"] != "pre-push"
+                or blocking["typed_origin_strategy"] != "U"
+                or blocking["lifecycle"]
+                != {
+                    "enter": 1,
+                    "exit": 1,
+                    "exit_after_reap": True,
+                    "exit_exception": None,
+                    "factory": 1,
+                }
+                or blocking["observation_order"]
+                != [
+                    "transaction-factory", "transaction-enter",
+                    "transaction-exit", "audit-returned", "metrics-read",
+                ]
+                or parity["bytes_equal"] is not True
+                or parity["cli_sha256"] != parity["import_sha256"]
+                or parity["cli_sha256"]
+                != cases["blocking"]["cli_bytes_sha256"]
+                or parity["import_sha256"]
+                != cases["blocking"]["import_bytes_sha256"]
+            ):
+                raise EvidenceError(
+                    f"{context} blocking audit escaped final accounting"
                 )
 
             def validate_rejection(name, item, reason):
@@ -4232,7 +4364,11 @@ def validate_manifest(manifest):
                     "facade_public_surface_closed",
                     "internal_sessions_have_no_default",
                     "main_runner_has_no_default", "ordinary_cli_absent",
+                    "intended_public_api_strategy_u_only",
+                    "private_strategy_surface_no_public_aliases",
                     "public_ordinary_audit_absent",
+                    "public_strategy_guard_observed_red",
+                    "public_strategy_selector_absent",
                     "public_strategy_surface_u_only",
                     "pipe_result_publication_bridge",
                     "repository_session_owns_metrics",
@@ -5736,6 +5872,9 @@ def render_readme(manifest):
     core = manifest["core_claims"]
     bounds = core["execution_bounds"]
     origins = core["origin_strategies"]
+    blocking_seam = core["immutable_event_workflows"]["cli_control"][
+        "observation"
+    ]["execution_seam"]["blocking"]
     by_id = {x["id"]: x for x in manifest["scenarios"]}
     p22, p19 = by_id["P22-PCX-18-one-pass-many-actions"], by_id["PCX-19-missing-claim-blob-recovery"]
     lines = [
@@ -5750,7 +5889,7 @@ def render_readme(manifest):
         f"Canonical evidence artifact: `{evidence_sha}`.",
         f"Canonical semantic stream: `{summary['canonical_stream_sha256']}`.",
         "The raw JSONL stream is ephemeral and has no stored hash claim.",
-        f"Evidence schemas v2 at commit `{core['evidence_supersession']['artifacts'][0]['commit']}`, v3 at commit `{core['evidence_supersession']['artifacts'][1]['commit']}`, v4 at commit `{core['evidence_supersession']['artifacts'][2]['commit']}`, v5 at commit `{core['evidence_supersession']['artifacts'][3]['commit']}`, v6 at commit `{core['evidence_supersession']['artifacts'][4]['commit']}`, v7 at commit `{core['evidence_supersession']['artifacts'][5]['commit']}`, v8 at commit `{core['evidence_supersession']['artifacts'][6]['commit']}`, v9 at commit `{core['evidence_supersession']['artifacts'][7]['commit']}`, v10 at commit `{core['evidence_supersession']['artifacts'][8]['commit']}`, v11 at commit `{core['evidence_supersession']['artifacts'][9]['commit']}`, and v12 at commit `{core['evidence_supersession']['artifacts'][10]['commit']}` are superseded and burned by their later blockers; all histories are preserved, no identifier is reused, and this artifact closes `{core['evidence_supersession']['replacement_schema']}`.",
+        f"Evidence schemas v2 at commit `{core['evidence_supersession']['artifacts'][0]['commit']}`, v3 at commit `{core['evidence_supersession']['artifacts'][1]['commit']}`, v4 at commit `{core['evidence_supersession']['artifacts'][2]['commit']}`, v5 at commit `{core['evidence_supersession']['artifacts'][3]['commit']}`, v6 at commit `{core['evidence_supersession']['artifacts'][4]['commit']}`, v7 at commit `{core['evidence_supersession']['artifacts'][5]['commit']}`, v8 at commit `{core['evidence_supersession']['artifacts'][6]['commit']}`, v9 at commit `{core['evidence_supersession']['artifacts'][7]['commit']}`, v10 at commit `{core['evidence_supersession']['artifacts'][8]['commit']}`, v11 at commit `{core['evidence_supersession']['artifacts'][9]['commit']}`, v12 at commit `{core['evidence_supersession']['artifacts'][10]['commit']}`, and v13 at commit `{core['evidence_supersession']['artifacts'][11]['commit']}` are superseded and burned by their later blockers; all histories are preserved, no identifier is reused, and this artifact closes `{core['evidence_supersession']['replacement_schema']}`.",
         f"The execution-bound runtime landed in commits `{bounds['runtime_milestone_commits'][0]}` and `{bounds['runtime_milestone_commits'][1]}`; the latter binds literal refusal at the 68th parent token.", "",
         "## Contract exercised", "",
         "The classifier accepts exactly two immutable inputs, old tip `O` and new tip",
@@ -5802,7 +5941,10 @@ def render_readme(manifest):
         "`audit_event(root, event_kind, payload, *, git_runner, budget_limit=None, transaction=None)`.",
         "The required keyword-only `git_runner` has no default, `None`, ambient, or",
         "process-global fallback. There is no advertised ordinary O/N CLI and no",
-        "selectable non-U production route.",
+        "selectable non-U production route. Strategy B remains only in private",
+        "diagnostic/self-test symbols; a static public-callable scan rejects either an",
+        "`origin_strategy` parameter, a Strategy B literal, or a public alias of those",
+        "private surfaces.",
         "Each valid audit creates a private `RepositorySession` that owns its resolved",
         "root, metrics, observer, children, descriptors, object database and caches,",
         "carry-proof cache, and uniquely named reconciler module. The reconciler's",
@@ -5825,6 +5967,11 @@ def render_readme(manifest):
         "after cleanup, cannot suppress the audit result, and final metrics are taken after",
         "exit. Non-cancellation factory/enter/exit failures are typed unreadable, while",
         "cancellation is deferred until independent cleanup and the permitted exit call finish.",
+        f"The blocking exit-1 seam runs one transaction and binds attempts=actual=before=after=runner_calls=runner_created=`{blocking_seam['attempts']}`.",
+        "Every created process is reaped, descriptor delta and retained cache entries are",
+        "zero, the private module is removed, and the observation order places the final",
+        "metrics read after transaction exit. Its CLI/import bytes match at",
+        f"`{blocking_seam['cli_import_byte_parity']['cli_sha256']}`.",
         "Deterministic cancellation at the first line after reconciler load, after the",
         "session ContextVar changes, after the runner result is published, after its local",
         "binding, after pipe attachment,",
@@ -6033,11 +6180,11 @@ def render_readme(manifest):
               f"PCX-19 is replay-bound by `{p19['record_sha256']}`. One ObjectDatabase reader observes a missing blob without caching the miss, the object is restored, the same reader/process succeeds, and a third read hits its positive cache.", "",
               "## Reproducible audit", "",
               "Use two fresh, empty scratch roots:", "", "```sh",
-              "PYTHONHASHSEED=1 LC_ALL=C LANG=C TZ=UTC PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-r27-v13-seed1 > /tmp/production-contract-r27-v13-seed1.jsonl",
-              "PYTHONHASHSEED=777 LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 TZ=America/Los_Angeles PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --reverse-construction --fixtures-dir /tmp/production-contract-r27-v13-seed777 > /tmp/production-contract-r27-v13-seed777.jsonl",
-              "python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r27-v13-seed1.jsonl --compare /tmp/production-contract-r27-v13-seed777.jsonl",
-              "python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r27-v13-seed1.jsonl --damage-test",
-              "python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r27-v13-seed1.jsonl --compare /tmp/production-contract-r27-v13-seed777.jsonl --generate",
+              "PYTHONHASHSEED=1 LC_ALL=C LANG=C TZ=UTC PYTHONPYCACHEPREFIX=/tmp/production-contract-v14-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-v14-seed1 > /tmp/production-contract-v14-seed1.jsonl",
+              "PYTHONHASHSEED=777 LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 TZ=America/Los_Angeles PYTHONPYCACHEPREFIX=/tmp/production-contract-v14-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --reverse-construction --fixtures-dir /tmp/production-contract-v14-seed777 > /tmp/production-contract-v14-seed777.jsonl",
+              "python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-v14-seed1.jsonl --compare /tmp/production-contract-v14-seed777.jsonl",
+              "python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-v14-seed1.jsonl --damage-test",
+              "python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-v14-seed1.jsonl --compare /tmp/production-contract-v14-seed777.jsonl --generate",
               "python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --repo /path/to/repo --event-kind push --event-payload /path/to/event.json",
               "python3 -m py_compile docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py",
               "python3 automation/run_tests.py --jobs 1", "python3 automation/reconcile/reconcile.py --check", "```", "",
@@ -6388,7 +6535,7 @@ def damage_matrix(expected, stream):
         "evidence schema supersession changed",
     )
     for superseded_index, superseded_version in enumerate(
-        range(7, 13), start=5
+        range(7, 14), start=5
     ):
         manifest_case(
             f"superseded-v{superseded_version}-commit-erased",
@@ -6431,6 +6578,52 @@ def damage_matrix(expected, stream):
             after=3
         ),
         "valid audit escaped session accounting",
+    )
+    manifest_case(
+        "event-blocking-observer-misses-child",
+        lambda d: d["core_claims"]["immutable_event_workflows"][
+            "cli_control"
+        ]["observation"]["execution_seam"]["blocking"].update(after=3),
+        "blocking audit escaped final accounting",
+    )
+    manifest_case(
+        "event-blocking-cache-leak",
+        lambda d: d["core_claims"]["immutable_event_workflows"][
+            "cli_control"
+        ]["observation"]["execution_seam"]["blocking"][
+            "cache_state"
+        ].update(carry_cache_entries=1),
+        "blocking leaked session cache state",
+    )
+    manifest_case(
+        "event-blocking-metrics-before-exit",
+        lambda d: d["core_claims"]["immutable_event_workflows"][
+            "cli_control"
+        ]["observation"]["execution_seam"]["blocking"].update(
+            observation_order=[
+                "transaction-factory", "transaction-enter",
+                "metrics-read", "transaction-exit", "audit-returned",
+            ]
+        ),
+        "blocking audit escaped final accounting",
+    )
+    manifest_case(
+        "event-blocking-cli-import-drift",
+        lambda d: d["core_claims"]["immutable_event_workflows"][
+            "cli_control"
+        ]["observation"]["execution_seam"]["blocking"][
+            "cli_import_byte_parity"
+        ].update(import_sha256="sha256:" + "0" * 64),
+        "blocking audit escaped final accounting",
+    )
+    manifest_case(
+        "event-public-strategy-surface",
+        lambda d: d["core_claims"]["immutable_event_workflows"][
+            "cli_control"
+        ]["observation"]["execution_seam"]["static_contract"].update(
+            public_strategy_selector_absent=False
+        ),
+        "static session boundary changed",
     )
     manifest_case(
         "descriptor-after-exit-leak",

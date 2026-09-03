@@ -10,10 +10,10 @@ It imports and calls the worktree's actual `queue_action_identity` and
 `queue_deletion_problem`, and `queue_mutation_problem`; it never invents
 an Action-ID or lifecycle verdict.
 
-Canonical evidence artifact: `sha256:7700731a95d3cc94dc6361428e2867609dfd92ff94cfd698fa5569c225fa9f82`.
-Canonical semantic stream: `sha256:d1304761393a4e26c70c7f98139a1447359730a7a4549a0a1e31ea5214e2beae`.
+Canonical evidence artifact: `sha256:ea7f719c3883bf98bc1afef4fe9bfa4f74a9ad548a1691c4c00dc99394755f0f`.
+Canonical semantic stream: `sha256:a2d3a8c5e442ce3482cd7d78733e43b4338634f4cb3f80a65b23a769adf3ff25`.
 The raw JSONL stream is ephemeral and has no stored hash claim.
-Evidence schemas v2 at commit `0b80c342feb310d73de6564aab2224a899f42486`, v3 at commit `7f4a1ffacd1cf8163f597daa186f801e9ce06a3a`, v4 at commit `cce76a037f1584ff7d37048cb4411bdf0f5aa907`, v5 at commit `d12b799a2fa27b05a5ee2af1b422131856296b41`, v6 at commit `9ab61c416be1911e44c6bce2b3d711b6f2abef15`, v7 at commit `820ae1a788f5b24493a4277fb4d79981e0be202f`, v8 at commit `c3793ec53c9b6aebe03b6e1b1cfa7badf3d4828a`, v9 at commit `8abc908840191185e222a29132e72630ebf73a21`, v10 at commit `5872446ad4ed1e9940f96b6e28b8f7042fccf6d1`, v11 at commit `1e1b81adae4cba13d29fac221a3de6ea78612ce7`, and v12 at commit `62b5715bb7d34cda32dfc71329e58680c3efb3b1` are superseded and burned by their later blockers; all histories are preserved, no identifier is reused, and this artifact closes `agentfold-production-contract-evidence/v13`.
+Evidence schemas v2 at commit `0b80c342feb310d73de6564aab2224a899f42486`, v3 at commit `7f4a1ffacd1cf8163f597daa186f801e9ce06a3a`, v4 at commit `cce76a037f1584ff7d37048cb4411bdf0f5aa907`, v5 at commit `d12b799a2fa27b05a5ee2af1b422131856296b41`, v6 at commit `9ab61c416be1911e44c6bce2b3d711b6f2abef15`, v7 at commit `820ae1a788f5b24493a4277fb4d79981e0be202f`, v8 at commit `c3793ec53c9b6aebe03b6e1b1cfa7badf3d4828a`, v9 at commit `8abc908840191185e222a29132e72630ebf73a21`, v10 at commit `5872446ad4ed1e9940f96b6e28b8f7042fccf6d1`, v11 at commit `1e1b81adae4cba13d29fac221a3de6ea78612ce7`, v12 at commit `62b5715bb7d34cda32dfc71329e58680c3efb3b1`, and v13 at commit `7844eeb5ed4a4534eafd6c7c7b06f2c05b35e6f7` are superseded and burned by their later blockers; all histories are preserved, no identifier is reused, and this artifact closes `agentfold-production-contract-evidence/v14`.
 The execution-bound runtime landed in commits `c32f470977735a63feaf377ca9290353d1520e0e` and `850d02587f7f812b7dde9667a39da80b4ce48764`; the latter binds literal refusal at the 68th parent token.
 
 ## Contract exercised
@@ -73,7 +73,10 @@ use `event_endpoints(event_kind, payload)` and typed-U-only
 `audit_event(root, event_kind, payload, *, git_runner, budget_limit=None, transaction=None)`.
 The required keyword-only `git_runner` has no default, `None`, ambient, or
 process-global fallback. There is no advertised ordinary O/N CLI and no
-selectable non-U production route.
+selectable non-U production route. Strategy B remains only in private
+diagnostic/self-test symbols; a static public-callable scan rejects either an
+`origin_strategy` parameter, a Strategy B literal, or a public alias of those
+private surfaces.
 Each valid audit creates a private `RepositorySession` that owns its resolved
 root, metrics, observer, children, descriptors, object database and caches,
 carry-proof cache, and uniquely named reconciler module. The reconciler's
@@ -96,6 +99,11 @@ cleanup finishes while the transaction remains active; `__exit__` is called once
 after cleanup, cannot suppress the audit result, and final metrics are taken after
 exit. Non-cancellation factory/enter/exit failures are typed unreadable, while
 cancellation is deferred until independent cleanup and the permitted exit call finish.
+The blocking exit-1 seam runs one transaction and binds attempts=actual=before=after=runner_calls=runner_created=`4`.
+Every created process is reaped, descriptor delta and retained cache entries are
+zero, the private module is removed, and the observation order places the final
+metrics read after transaction exit. Its CLI/import bytes match at
+`sha256:906899266f4236f932824eb732befa6049ded3942abc1b23f2381442cb6d9c5f`.
 Deterministic cancellation at the first line after reconciler load, after the
 session ContextVar changes, after the runner result is published, after its local
 binding, after pipe attachment,
@@ -245,7 +253,7 @@ The 64-parent outside-C octopus exits 2 transactionally and is record-bound by `
 The P22 pre-charge case stops exactly at `object_reads=134>133`, keeps Git processes at 4, freezes later counters, and is record-bound by `sha256:d7102979bd1f64c2d1e5d873b692b73d200f2e4cae24fafa37318c0ed689ced7`; its post-hoc damage reproduces the prior 10,973-snapshot/24,736-cache-hit full run.
 Ten runtime exact/+1 pairs bind streaming graph bytes/lines/tokens, object payloads, flattened trees, dynamic support traversal, certificate serialization, origin-arm nodes/parent edges, and canonical birth-witness bytes. Every +1 refusal exits 2 with zero partial results; graph reads peak at 256 bytes per chunk and publish nothing on refusal. P22 separately observes exactly 129 imported production parent queries, 135 Git spawn attempts, and 135 actual Git children.
 Unreadable Git objects use the stable typed reason `missing-or-malformed-commit:b5fcd8d0260da07b741462af3e3e2b49b546d600`. Every Git child is forced to C locale and UTC; the stable C/French results are equal even though the independent ambient diagnostic streams differ.
-Before any projection or digest, all 273 raw rows must match the static recursive key/list/type grammar catalog `sha256:96b303999536f2d0a28968910bfd4c8674c7d8fa571862d47236c4e89728eb23`; an unknown top-level or nested field exits 1.
+Before any projection or digest, all 273 raw rows must match the static recursive key/list/type grammar catalog `sha256:3f727113d39ec191c91656954f20ef0a8bec9bdf1f5d197784fb39e1748d8c01`; an unknown top-level or nested field exits 1.
 The parent-order pair has identical verdicts and the same role multiset:
 `['compatible-carrier', 'source']`. The four persisted parent-order pairs and the origin-birth parent-order pair are also equal by semantic signature.
 
@@ -313,8 +321,8 @@ Wide-boundary budget reference OIDs (bound review input):
 |---|---:|---|
 | `docs/AGENTS.md` | 675 | `sha256:5342de9cada318428ea9b091e2434ad4d1e19e173a87295fe978651dc1a04b14` |
 | `docs/designs/AGENTS.md` | 709 | `sha256:0e8c04dea40750971f0a567e84dd33ae5529960629abee9323234046105649e8` |
-| `docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py` | 352099 | `sha256:e32c79a0b8f5fa2a013d3d2b7c71f593276b432470b5221ecd71fe878f0d4ef2` |
-| `docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py` | 661023 | `sha256:13b20242fef87e79db4df8048abd88180a37a69a0d7474ec4b86d81fe90041d1` |
+| `docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py` | 360863 | `sha256:293ba06be42107d26f6be83f2b12379b0fc3354ee50289fdb822db59db42ac62` |
+| `docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py` | 670021 | `sha256:ebe7291a4d3e6cf9b314d00097d7bc1b9f0410227747303bca2850d5fdfc31d3` |
 | `automation/check_action_projection.py` | 123062 | `sha256:bd9f73b79b3fac94f36d8248b4ce23c6fa7826da45d562a85bd9b1e14255e0c1` |
 | `automation/markdown_semantics.py` | 33735 | `sha256:a5f58a99e739af4e3e61109caa880cb68dc739d93c727b74b8e2456220641c63` |
 | `automation/reconcile/reconcile.py` | 499357 | `sha256:0436489bf3bb9a52ff80e6e36962393413d626d034b029e938876f4ddd84c0b7` |
@@ -587,7 +595,7 @@ A/P/U/S means authority, propagation, persisted mutation, and supplier-support c
 | `broad-review-pending-normalization` | `fe50d93da4de5ba4e924562e499d68c3dfe93118` | `1f06d5a4de78cd24f1f97cd617c10ab79bbf5487` | `ba4edb8f323adba9645e47c2536f2b621bed7855` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:292e6c32afeb9ca638d3bad9cd4a9596302eee6456662ce51f51bf84a31df86d` |
 | `buffered-graph-output` | `c2080829aec4e8ae17a17e29fd823b80e74d99d0` | `a2659af5918566489ae4ea08c86925a0b276ad90` | `0f42c9312d8a41d51c1e17d3776a6ec5a8e657e2` | `blocking-finding` | `blocking-finding` | `OBSERVED_RED` | `sha256:4076adca6645e7afdbbc0cd09df9cfdf73c8396d8a6f9475346170a5608ad5d0` |
 | `endpoint-only-origin-equality` | `470a8cb8473e6cd5336a87220feaacb3e2ec53e0` | `4a58c18ccdc13f072d74f6b134ad76b98f28463c` | `6a39f8fd46eccd075abe13037b8ab08311fbbdd5` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:c4e33f3dab8b3dc1ad85cf9cb33ceea7717c5017d1ca85ce2cedb4aa6f3caa4e` |
-| `event-adapter-cli-entrypoint` | `0000000000000000000000000000000000000000` | `0000000000000000000000000000000000000000` | `0000000000000000000000000000000000000000` | `three-exit-adapter-contract` | `ambient-or-shared-session-boundary` | `OBSERVED_RED` | `sha256:28c5948b9a36ba84454af5074727933e7fef1c3bc4c29a1345bca47d29cb5e17` |
+| `event-adapter-cli-entrypoint` | `0000000000000000000000000000000000000000` | `0000000000000000000000000000000000000000` | `0000000000000000000000000000000000000000` | `three-exit-adapter-contract` | `ambient-or-shared-session-boundary` | `OBSERVED_RED` | `sha256:19a91842eedf613683cecb838f36142dc6c37010d7d7a5e3f6b86d02865229ab` |
 | `first-parent-carry-proof` | `bb60281870ffd7279e90c3fdb11326b1759a64f3` | `20417860a7a086bb0f2a171db425ac97f43c5269` | `d9fb9b1c536e2ef615e7ed902c697ebe84f27793` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:8c6b273cd04dcb4b4d17e60a3c3913f929ff3342d72b92ccfacd964f07d8f74e` |
 | `identity-multiplicity-collapsed-to-set` | `bc6aa9f19ca8f454518b57c31d776631febc8cc1` | `7dfc74cea7ca951a4a21f28ef492e36f3fff17e6` | `21f67ef2f92ee4ee90ffd14a7e531e5f33f281cc` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:7e6e7b7646ca1bcd1821ef3fd920528858c6a8e435eb04b5ff975ff4ebd20ccc` |
 | `ignore-absent-C-arm` | `a3cbba79bd52df83262715df9652f338ed3b7f5f` | `a6a471c1129d9af27fd96ae12ec4bee2d2f326e5` | `a5e82a41d59db68164823c9fb5a58359bcf1ec49` | `blocking-finding` | `no-finding` | `OBSERVED_RED` | `sha256:f9a91f587c7790cdfdcd77cd3f389ea8fe9a54a4a27ce0f51af4d4809e75e3a4` |
@@ -642,11 +650,11 @@ PCX-19 is replay-bound by `sha256:95812f65a03b9717a9455f1dcaefdeb68fa4b4d738cc8e
 Use two fresh, empty scratch roots:
 
 ```sh
-PYTHONHASHSEED=1 LC_ALL=C LANG=C TZ=UTC PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-r27-v13-seed1 > /tmp/production-contract-r27-v13-seed1.jsonl
-PYTHONHASHSEED=777 LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 TZ=America/Los_Angeles PYTHONPYCACHEPREFIX=/tmp/production-contract-poc-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --reverse-construction --fixtures-dir /tmp/production-contract-r27-v13-seed777 > /tmp/production-contract-r27-v13-seed777.jsonl
-python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r27-v13-seed1.jsonl --compare /tmp/production-contract-r27-v13-seed777.jsonl
-python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r27-v13-seed1.jsonl --damage-test
-python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-r27-v13-seed1.jsonl --compare /tmp/production-contract-r27-v13-seed777.jsonl --generate
+PYTHONHASHSEED=1 LC_ALL=C LANG=C TZ=UTC PYTHONPYCACHEPREFIX=/tmp/production-contract-v14-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --fixtures-dir /tmp/production-contract-v14-seed1 > /tmp/production-contract-v14-seed1.jsonl
+PYTHONHASHSEED=777 LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 TZ=America/Los_Angeles PYTHONPYCACHEPREFIX=/tmp/production-contract-v14-pycache python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --self-test --reverse-construction --fixtures-dir /tmp/production-contract-v14-seed777 > /tmp/production-contract-v14-seed777.jsonl
+python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-v14-seed1.jsonl --compare /tmp/production-contract-v14-seed777.jsonl
+python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-v14-seed1.jsonl --damage-test
+python3 -I -S docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py --stream /tmp/production-contract-v14-seed1.jsonl --compare /tmp/production-contract-v14-seed777.jsonl --generate
 python3 docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py --repo /path/to/repo --event-kind push --event-payload /path/to/event.json
 python3 -m py_compile docs/designs/restack-queue-provenance/pocs/production-contract/prototype.py docs/designs/restack-queue-provenance/pocs/production-contract/audit_readme.py
 python3 automation/run_tests.py --jobs 1

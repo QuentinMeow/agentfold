@@ -356,7 +356,7 @@ class ActionState:
 
 
 @dataclasses.dataclass
-class Fixture:
+class _Fixture:
     scenario: str
     repo: "GitRepository"
     expected_C: str
@@ -2560,12 +2560,12 @@ class Graph:
         return intrinsic + sorted(self.boundary_parents)
 
 
-class Classifier:
+class _Classifier:
     """In-memory provenance over one enumerated graph and cached snapshots."""
 
     def __init__(
         self,
-        fixture: Fixture,
+        fixture: _Fixture,
         damage: Damage | None = None,
         *,
         session: RepositorySession,
@@ -2907,13 +2907,13 @@ class Classifier:
             )
         if isinstance(value, (list, tuple)):
             return 2 + max(0, len(value) - 1) + sum(
-                Classifier.canonical_json_size(item) for item in value
+                _Classifier.canonical_json_size(item) for item in value
             )
         if isinstance(value, dict):
             return 2 + max(0, len(value) - 1) + sum(
-                Classifier.canonical_json_size(str(key))
+                _Classifier.canonical_json_size(str(key))
                 + 1
-                + Classifier.canonical_json_size(value[key])
+                + _Classifier.canonical_json_size(value[key])
                 for key in sorted(value)
             )
         raise TypeError(f"unsupported canonical JSON value {type(value)!r}")
@@ -6106,7 +6106,7 @@ class Classifier:
                 raise cleanup_error
 
 
-def run_classifier(fixture: Fixture, damage: Damage | None = None) -> dict:
+def _run_classifier(fixture: _Fixture, damage: Damage | None = None) -> dict:
     """Run a fixture in one explicit, fully cleaned repository session."""
     session = RepositorySession(
         fixture.repo.root,
@@ -6121,7 +6121,7 @@ def run_classifier(fixture: Fixture, damage: Damage | None = None) -> dict:
     cleanup_error = None
     session.open()
     try:
-        result = Classifier(fixture, damage, session=session).run()
+        result = _Classifier(fixture, damage, session=session).run()
     except BaseException as error:
         body_error = error
     try:
@@ -6232,7 +6232,7 @@ def review_text(
 ):
     rendered_target = (
         target
-        if Classifier.explicit_review_pending(target)
+        if _Classifier.explicit_review_pending(target)
         else f"`{target}`"
     )
     return (
@@ -6453,7 +6453,7 @@ def feature(repo: GitRepository, label: str):
 
 def ordinary_linear_fixture(
     root: Path, scenario: str, *, valid: bool
-) -> Fixture:
+) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     label = scenario.lower()
@@ -6469,7 +6469,7 @@ def ordinary_linear_fixture(
         repo.remove(path)
         candidate_landmark = repo.commit("delete without authority")
     N = feature(repo, f"{label}-old")
-    return Fixture(
+    return _Fixture(
         scenario,
         repo,
         C,
@@ -6480,7 +6480,7 @@ def ordinary_linear_fixture(
     )
 
 
-def p3_old_loss(root: Path) -> Fixture:
+def p3_old_loss(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     C = repo.commit("create action-free C")
@@ -6490,7 +6490,7 @@ def p3_old_loss(root: Path) -> Fixture:
     repo.branch("candidate", C)
     candidate_landmark = feature(repo, "p3-base")
     N = feature(repo, "p3-task")
-    return Fixture(
+    return _Fixture(
         "P3-genuine-old-loss",
         repo,
         C,
@@ -6502,7 +6502,7 @@ def p3_old_loss(root: Path) -> Fixture:
     )
 
 
-def p4_pre_c_origins(root: Path) -> Fixture:
+def p4_pre_c_origins(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     R = repo.commit("create pre-C root")
@@ -6522,7 +6522,7 @@ def p4_pre_c_origins(root: Path) -> Fixture:
     claim(repo, (path,))
     candidate_landmark = delete_with_evidence(repo, (("p4", path),))
     N = feature(repo, "p4-old")
-    return Fixture(
+    return _Fixture(
         "P4-pre-C-identical-origins",
         repo,
         C,
@@ -6534,7 +6534,7 @@ def p4_pre_c_origins(root: Path) -> Fixture:
     )
 
 
-def p5_duplicate_at_c(root: Path) -> Fixture:
+def p5_duplicate_at_c(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     text = agent_text("p5")
@@ -6551,7 +6551,7 @@ def p5_duplicate_at_c(root: Path) -> Fixture:
     repo.remove(second)
     candidate_landmark = repo.commit("delete both duplicate paths")
     N = feature(repo, "p5-old")
-    return Fixture(
+    return _Fixture(
         "P5-duplicate-at-C",
         repo,
         C,
@@ -6562,7 +6562,7 @@ def p5_duplicate_at_c(root: Path) -> Fixture:
     )
 
 
-def p6_old_recreate(root: Path) -> Fixture:
+def p6_old_recreate(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     path = add_agent(repo, "p6-old")
@@ -6578,7 +6578,7 @@ def p6_old_recreate(root: Path) -> Fixture:
     claim(repo, (path,))
     candidate_landmark = delete_with_evidence(repo, (("p6-old", path),))
     N = feature(repo, "p6-old-task")
-    return Fixture(
+    return _Fixture(
         "P6a-old-delete-recreate",
         repo,
         C,
@@ -6589,7 +6589,7 @@ def p6_old_recreate(root: Path) -> Fixture:
     )
 
 
-def p6_candidate_recreate(root: Path) -> Fixture:
+def p6_candidate_recreate(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     path = add_agent(repo, "p6-candidate")
@@ -6607,7 +6607,7 @@ def p6_candidate_recreate(root: Path) -> Fixture:
         repo, (("p6-candidate", path),), "second deletion"
     )
     N = feature(repo, "p6-candidate-old")
-    return Fixture(
+    return _Fixture(
         "P6b-candidate-delete-recreate",
         repo,
         C,
@@ -6618,7 +6618,7 @@ def p6_candidate_recreate(root: Path) -> Fixture:
     )
 
 
-def p7_payload_change(root: Path) -> Fixture:
+def p7_payload_change(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     path = add_agent(repo, "p7")
@@ -6632,7 +6632,7 @@ def p7_payload_change(root: Path) -> Fixture:
     claim(repo, (path,))
     candidate_landmark = delete_with_evidence(repo, (("p7", path),))
     N = feature(repo, "p7-old")
-    return Fixture(
+    return _Fixture(
         "P7-immutable-payload-change",
         repo,
         C,
@@ -6649,7 +6649,7 @@ def p7_payload_change(root: Path) -> Fixture:
     )
 
 
-def p8_timing_move(root: Path) -> Fixture:
+def p8_timing_move(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     old_path = add_agent(
@@ -6680,7 +6680,7 @@ def p8_timing_move(root: Path) -> Fixture:
             )
         ),
     }
-    return Fixture(
+    return _Fixture(
         "P8-path-timing-move",
         repo,
         C,
@@ -6699,7 +6699,7 @@ def direct_merge_fixture(
     parent_count: int,
     invalid_parent: int | None = None,
     neutral_parent: bool = False,
-) -> Fixture:
+) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     label = scenario.lower()
@@ -6731,7 +6731,7 @@ def direct_merge_fixture(
         if invalid_parent is not None
         else "no-finding"
     )
-    return Fixture(
+    return _Fixture(
         scenario,
         repo,
         C,
@@ -6751,7 +6751,7 @@ def direct_merge_fixture(
     )
 
 
-def pcx03_foreign_identity(root: Path) -> Fixture:
+def pcx03_foreign_identity(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     R = repo.commit("create pre-C root")
@@ -6775,7 +6775,7 @@ def pcx03_foreign_identity(root: Path) -> Fixture:
         removes=(path,),
     )
     N = feature(repo, "pcx03-old")
-    return Fixture(
+    return _Fixture(
         "PCX-03-foreign-exact-identity",
         repo,
         C,
@@ -6798,7 +6798,7 @@ def supplier_fixture(
     supplier_valid: bool,
     carrier_claimed: bool = False,
     merge_changes_evidence: bool = False,
-) -> Fixture:
+) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     label = scenario.lower()
@@ -6831,7 +6831,7 @@ def supplier_fixture(
         removes=(path,),
     )
     N = feature(repo, f"{label}-old")
-    return Fixture(
+    return _Fixture(
         scenario,
         repo,
         C,
@@ -6847,7 +6847,7 @@ def supplier_fixture(
     )
 
 
-def p14_supplier_reintroduced(root: Path) -> Fixture:
+def p14_supplier_reintroduced(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     path = add_agent(repo, "p14")
@@ -6874,7 +6874,7 @@ def p14_supplier_reintroduced(root: Path) -> Fixture:
         removes=(path,),
     )
     N = feature(repo, "p14-old")
-    return Fixture(
+    return _Fixture(
         "P14-supplier-reintroduced",
         repo,
         C,
@@ -6886,7 +6886,7 @@ def p14_supplier_reintroduced(root: Path) -> Fixture:
     )
 
 
-def p15_competing_suppliers(root: Path) -> Fixture:
+def p15_competing_suppliers(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     path = add_agent(repo, "p15")
@@ -6912,7 +6912,7 @@ def p15_competing_suppliers(root: Path) -> Fixture:
         removes=(path,),
     )
     N = feature(repo, "p15-old")
-    return Fixture(
+    return _Fixture(
         "P15-competing-suppliers",
         repo,
         C,
@@ -6924,7 +6924,7 @@ def p15_competing_suppliers(root: Path) -> Fixture:
     )
 
 
-def p17_post_event_reintroduction(root: Path) -> Fixture:
+def p17_post_event_reintroduction(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     path = add_agent(repo, "p17")
@@ -6942,7 +6942,7 @@ def p17_post_event_reintroduction(root: Path) -> Fixture:
     repo.remove(path)
     candidate_landmark = repo.commit("delete recreated p17 without claim")
     N = feature(repo, "p17-old")
-    return Fixture(
+    return _Fixture(
         "P17-post-event-reintroduction",
         repo,
         C,
@@ -6954,7 +6954,7 @@ def p17_post_event_reintroduction(root: Path) -> Fixture:
     )
 
 
-def pcx04_shared_supplier(root: Path) -> Fixture:
+def pcx04_shared_supplier(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     path = add_agent(repo, "pcx04")
@@ -6978,7 +6978,7 @@ def pcx04_shared_supplier(root: Path) -> Fixture:
         removes=(path,),
     )
     N = feature(repo, "pcx04-old")
-    return Fixture(
+    return _Fixture(
         "PCX-04-several-absent-one-supplier",
         repo,
         C,
@@ -6994,7 +6994,7 @@ def pcx04_shared_supplier(root: Path) -> Fixture:
     )
 
 
-def pcx05_competing_later_supplier(root: Path) -> Fixture:
+def pcx05_competing_later_supplier(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     path = add_agent(repo, "pcx05")
@@ -7027,7 +7027,7 @@ def pcx05_competing_later_supplier(root: Path) -> Fixture:
         removes=(path,),
     )
     N = feature(repo, "pcx05-old")
-    return Fixture(
+    return _Fixture(
         "PCX-05-competing-later-supplier",
         repo,
         C,
@@ -7039,7 +7039,7 @@ def pcx05_competing_later_supplier(root: Path) -> Fixture:
     )
 
 
-def pcx06_nested_supplier(root: Path) -> Fixture:
+def pcx06_nested_supplier(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     R = repo.commit("create pcx06 pre-C root")
@@ -7078,7 +7078,7 @@ def pcx06_nested_supplier(root: Path) -> Fixture:
         removes=(path,),
     )
     N = feature(repo, "pcx06-old")
-    return Fixture(
+    return _Fixture(
         "PCX-06-nested-supplier-over-direct",
         repo,
         C,
@@ -7096,7 +7096,7 @@ def pcx06_nested_supplier(root: Path) -> Fixture:
     )
 
 
-def pcx09_recreated_claimed_bytes(root: Path) -> Fixture:
+def pcx09_recreated_claimed_bytes(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     path = add_agent(repo, "pcx09")
@@ -7121,7 +7121,7 @@ def pcx09_recreated_claimed_bytes(root: Path) -> Fixture:
         removes=(path,),
     )
     N = feature(repo, "pcx09-old")
-    return Fixture(
+    return _Fixture(
         "PCX-09-recreated-claimed-bytes",
         repo,
         C,
@@ -7133,7 +7133,7 @@ def pcx09_recreated_claimed_bytes(root: Path) -> Fixture:
     )
 
 
-def pcx10_transient_multiplicity(root: Path) -> Fixture:
+def pcx10_transient_multiplicity(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     first = add_agent(repo, "pcx10")
@@ -7150,7 +7150,7 @@ def pcx10_transient_multiplicity(root: Path) -> Fixture:
     repo.commit("collapse transient duplicate")
     candidate_landmark = delete_with_evidence(repo, (("pcx10", first),))
     N = feature(repo, "pcx10-old")
-    return Fixture(
+    return _Fixture(
         "PCX-10-transient-multiplicity",
         repo,
         C,
@@ -7162,7 +7162,7 @@ def pcx10_transient_multiplicity(root: Path) -> Fixture:
     )
 
 
-def pcx11_distinct_payload(root: Path) -> Fixture:
+def pcx11_distinct_payload(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     R = repo.commit("create pcx11 pre-C root")
@@ -7195,7 +7195,7 @@ def pcx11_distinct_payload(root: Path) -> Fixture:
         removes=(path,),
     )
     N = feature(repo, "pcx11-old")
-    return Fixture(
+    return _Fixture(
         "PCX-11-different-payload-same-path",
         repo,
         C,
@@ -7210,7 +7210,7 @@ def pcx11_distinct_payload(root: Path) -> Fixture:
     )
 
 
-def pcx12_timing_supplier(root: Path) -> Fixture:
+def pcx12_timing_supplier(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     old_path = add_agent(
@@ -7236,7 +7236,7 @@ def pcx12_timing_supplier(root: Path) -> Fixture:
         removes=(old_path, moved),
     )
     N = feature(repo, "pcx12-old")
-    return Fixture(
+    return _Fixture(
         "PCX-12-timing-rename-supplier",
         repo,
         C,
@@ -7250,7 +7250,7 @@ def pcx12_timing_supplier(root: Path) -> Fixture:
 
 def human_supplier_fixture(
     root: Path, scenario: str, *, conflicting_carrier: bool
-) -> Fixture:
+) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     R = repo.commit("create human supplier pre-C root")
@@ -7327,7 +7327,7 @@ def human_supplier_fixture(
             removes=(path,),
         )
     N = feature(repo, f"{label}-old")
-    return Fixture(
+    return _Fixture(
         scenario,
         repo,
         C,
@@ -7345,7 +7345,7 @@ def human_supplier_fixture(
 
 def r8_human_response_binding(
     root: Path, *, mode: str, conflict: bool
-) -> Fixture:
+) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     disposition = "conflict" if conflict else "identical"
@@ -7378,7 +7378,7 @@ def r8_human_response_binding(
     else:
         candidate_landmark = deletion
     N = feature(repo, f"{label}-old")
-    return Fixture(
+    return _Fixture(
         f"R8-{mode}-human-response-{disposition}",
         repo,
         C,
@@ -7398,7 +7398,7 @@ def r8_human_response_binding(
     )
 
 
-def r8_review_binding(root: Path, *, divergent: bool) -> Fixture:
+def r8_review_binding(root: Path, *, divergent: bool) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     disposition = "divergent" if divergent else "identical"
@@ -7436,7 +7436,7 @@ def r8_review_binding(root: Path, *, divergent: bool) -> Fixture:
     )
     candidate_landmark = deletion
     N = feature(repo, f"{label}-old")
-    return Fixture(
+    return _Fixture(
         f"R8-review-binding-{disposition}",
         repo,
         C,
@@ -7457,7 +7457,7 @@ def r8_review_binding(root: Path, *, divergent: bool) -> Fixture:
     )
 
 
-def r8_review_terminal_binding_conflict(root: Path) -> Fixture:
+def r8_review_terminal_binding_conflict(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     label = "r8-review-terminal-conflict"
@@ -7486,7 +7486,7 @@ def r8_review_terminal_binding_conflict(root: Path) -> Fixture:
         "resolve candidate terminal-binding review",
     )
     N = feature(repo, f"{label}-old")
-    return Fixture(
+    return _Fixture(
         "R8-review-binding-terminal-conflict",
         repo,
         C,
@@ -7519,7 +7519,7 @@ def r8_review_terminal_binding_conflict(root: Path) -> Fixture:
 
 def r9_review_pending_binding(
     root: Path, *, mode: str, pending_field: str
-) -> Fixture:
+) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     field_slug = (
@@ -7568,7 +7568,7 @@ def r9_review_pending_binding(
         if pending_field == "Review target"
         else revision
     )
-    return Fixture(
+    return _Fixture(
         f"R9-{mode}-review-{field_slug}-pending-fill",
         repo,
         C,
@@ -7595,7 +7595,7 @@ def r10_malformed_review_binding(
     field: str,
     malformed_value: str,
     slug: str,
-) -> Fixture:
+) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     field_slug = "target" if field == "Review target" else "revision"
@@ -7649,7 +7649,7 @@ def r10_malformed_review_binding(
     candidate_value = (
         f"`{target}`" if field == "Review target" else revision
     )
-    return Fixture(
+    return _Fixture(
         f"R10-{mode}-review-{field_slug}-{slug}-rejected",
         repo,
         C,
@@ -7671,7 +7671,7 @@ def r10_malformed_review_binding(
 
 def r13_review_parent_binding(
     root: Path, *, mode: str, variant: str
-) -> Fixture:
+) -> _Fixture:
     """Bind every direct/supplier carrying parent to O's concrete review."""
     if mode not in {"direct", "supplier"}:
         raise ValueError(mode)
@@ -7755,7 +7755,7 @@ def r13_review_parent_binding(
         "revision": "Review revision",
         "terminal": "Review outcome",
     }[variant]
-    return Fixture(
+    return _Fixture(
         f"R13-{mode}-review-binding-{variant}",
         repo,
         C,
@@ -7808,7 +7808,7 @@ def low_similarity_delivery_text(text: str, marker: str) -> str:
     raise RuntimeError("fixture has no Resolution evidence field")
 
 
-def r13_persisted_state(root: Path, variant: str) -> Fixture:
+def r13_persisted_state(root: Path, variant: str) -> _Fixture:
     """Check O/N mutable state without relying on Git rename similarity."""
     variants = {
         "same-state",
@@ -7921,7 +7921,7 @@ def r13_persisted_state(root: Path, variant: str) -> Fixture:
         "review-outcome-change",
         "claim-loss",
     }
-    return Fixture(
+    return _Fixture(
         f"R13-persisted-{variant}",
         repo,
         C,
@@ -7951,7 +7951,7 @@ def r14_review_carrier_binding(
     mode: str,
     carrier_variant: str,
     old_answered: bool,
-) -> Fixture:
+) -> _Fixture:
     """Exercise concrete published review state even when unanswered."""
     if mode not in {"direct", "supplier"}:
         raise ValueError(mode)
@@ -8038,7 +8038,7 @@ def r14_review_carrier_binding(
     N = feature(repo, f"{label}-new")
 
     conflict = carrier_variant in {"target", "revision"}
-    return Fixture(
+    return _Fixture(
         f"R14-{mode}-old-{answered_slug}-carrier-{carrier_variant}",
         repo,
         C,
@@ -8060,7 +8060,7 @@ def r14_review_carrier_binding(
     )
 
 
-def r14_persisted_hidden_bytes(root: Path) -> Fixture:
+def r14_persisted_hidden_bytes(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     label = "r14-persisted-hidden-bytes"
@@ -8087,7 +8087,7 @@ def r14_persisted_hidden_bytes(root: Path) -> Fixture:
     name_status = repo.run(
         "diff", "--name-status", "-M", O, N, "--", path, moved
     ).stdout.splitlines()
-    return Fixture(
+    return _Fixture(
         "R14-persisted-hidden-bytes-low-similarity",
         repo,
         C,
@@ -8115,7 +8115,7 @@ def r14_persisted_hidden_bytes(root: Path) -> Fixture:
     )
 
 
-def r14_persisted_intermediate_claim(root: Path) -> Fixture:
+def r14_persisted_intermediate_claim(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     label = "r14-persisted-intermediate-claim"
@@ -8134,7 +8134,7 @@ def r14_persisted_intermediate_claim(root: Path) -> Fixture:
     repo.write(path, before_bad)
     candidate_landmark = repo.commit("restore candidate claim before endpoint")
     N = feature(repo, f"{label}-new")
-    return Fixture(
+    return _Fixture(
         "R14-persisted-intermediate-claim-regression",
         repo,
         C,
@@ -8146,7 +8146,7 @@ def r14_persisted_intermediate_claim(root: Path) -> Fixture:
     )
 
 
-def r14_persisted_intermediate_review(root: Path) -> Fixture:
+def r14_persisted_intermediate_review(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     label = "r14-persisted-intermediate-review"
@@ -8183,7 +8183,7 @@ def r14_persisted_intermediate_review(root: Path) -> Fixture:
     repo.write(path, original)
     candidate_landmark = repo.commit("restore review binding before endpoint")
     N = feature(repo, f"{label}-new")
-    return Fixture(
+    return _Fixture(
         "R14-persisted-intermediate-review-regression",
         repo,
         C,
@@ -8195,7 +8195,7 @@ def r14_persisted_intermediate_review(root: Path) -> Fixture:
     )
 
 
-def r14_persisted_delete_recreate(root: Path) -> Fixture:
+def r14_persisted_delete_recreate(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     label = "r14-persisted-delete-recreate"
@@ -8211,7 +8211,7 @@ def r14_persisted_delete_recreate(root: Path) -> Fixture:
     repo.write(moved, original)
     candidate_landmark = repo.commit("recreate exact persisted identity")
     N = feature(repo, f"{label}-new")
-    return Fixture(
+    return _Fixture(
         "R14-persisted-delete-recreate",
         repo,
         C,
@@ -8223,7 +8223,7 @@ def r14_persisted_delete_recreate(root: Path) -> Fixture:
     )
 
 
-def r14_persisted_review_retraction(root: Path) -> Fixture:
+def r14_persisted_review_retraction(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     label = "r14-persisted-review-retraction"
@@ -8256,7 +8256,7 @@ def r14_persisted_review_retraction(root: Path) -> Fixture:
     published_B = publish_review(repo, path, target_B, revision_B)
     candidate_landmark = published_B
     N = feature(repo, f"{label}-new")
-    return Fixture(
+    return _Fixture(
         "R14-persisted-valid-review-retraction",
         repo,
         C,
@@ -8272,7 +8272,7 @@ def r14_persisted_review_retraction(root: Path) -> Fixture:
     )
 
 
-def r14_persisted_first_response_move(root: Path) -> Fixture:
+def r14_persisted_first_response_move(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     label = "r14-persisted-first-response-move"
@@ -8289,7 +8289,7 @@ def r14_persisted_first_response_move(root: Path) -> Fixture:
     name_status = repo.run(
         "diff", "--name-status", "-M", O, N, "--", path, moved
     ).stdout.splitlines()
-    return Fixture(
+    return _Fixture(
         "R14-persisted-valid-first-response-low-similarity",
         repo,
         C,
@@ -8310,7 +8310,7 @@ def r14_persisted_first_response_move(root: Path) -> Fixture:
     )
 
 
-def r14_persisted_merge_carriers(root: Path, *, conflict: bool) -> Fixture:
+def r14_persisted_merge_carriers(root: Path, *, conflict: bool) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     slug = "conflict" if conflict else "pending"
@@ -8349,7 +8349,7 @@ def r14_persisted_merge_carriers(root: Path, *, conflict: bool) -> Fixture:
         writes={path: source_text},
     )
     N = feature(repo, f"{label}-new")
-    return Fixture(
+    return _Fixture(
         f"R14-persisted-merge-carrier-{slug}",
         repo,
         C,
@@ -8361,7 +8361,7 @@ def r14_persisted_merge_carriers(root: Path, *, conflict: bool) -> Fixture:
     )
 
 
-def r17_outside_c_neutral_parent(root: Path) -> Fixture:
+def r17_outside_c_neutral_parent(root: Path) -> _Fixture:
     """Exact legal-restack DAG from the r17 blocking core review."""
     repo = GitRepository(root)
     initialize(repo)
@@ -8396,7 +8396,7 @@ def r17_outside_c_neutral_parent(root: Path) -> Fixture:
             K,
             deletion,
         )
-    return Fixture(
+    return _Fixture(
         "R17-outside-C-neutral-parent-valid-restack",
         repo,
         C,
@@ -8428,7 +8428,7 @@ def r17_outside_c_neutral_parent(root: Path) -> Fixture:
 
 def r17_carry_merge_fixture(
     root: Path, *, variant: str, reverse_parents: bool = False
-) -> Fixture:
+) -> _Fixture:
     """Exercise one retained live occurrence across a post-C merge."""
     if variant not in {
         "compatible",
@@ -8488,7 +8488,7 @@ def r17_carry_merge_fixture(
     N = feature(repo, f"{label}-task-patch")
     expected = "no-finding" if variant == "compatible" else "blocking-finding"
     suffix = "-reversed" if reverse_parents else ""
-    return Fixture(
+    return _Fixture(
         f"R17-carry-{variant}{suffix}",
         repo,
         C,
@@ -8511,7 +8511,7 @@ def r17_carry_merge_fixture(
 
 def r17_persisted_carry_fixture(
     root: Path, *, variant: str, reverse_parents: bool = False
-) -> Fixture:
+) -> _Fixture:
     """Persist Q across a merge whose second arm must still compete."""
     if variant not in {
         "outside-single",
@@ -8595,7 +8595,7 @@ def r17_persisted_carry_fixture(
             "N": "76cf3354a913effec09cac7b183684159dfd0b84",
         }
     suffix = "-reversed" if reverse_parents else ""
-    return Fixture(
+    return _Fixture(
         f"R17-persisted-{variant}{suffix}",
         repo,
         C,
@@ -8613,7 +8613,7 @@ def r17_boundary_budget_fixture(
     counter: str = "graph_parent_tokens",
     limit: int = 7,
     exact: bool = False,
-) -> Fixture:
+) -> _Fixture:
     """Meter a small intrinsic cone with a wide outside-C boundary."""
     repo = GitRepository(root)
     initialize(repo)
@@ -8639,7 +8639,7 @@ def r17_boundary_budget_fixture(
         if exact
         else "R17-wide-outside-C-boundary-budget"
     )
-    return Fixture(
+    return _Fixture(
         scenario,
         repo,
         C,
@@ -8671,7 +8671,7 @@ def r17_boundary_budget_fixture(
     )
 
 
-def r17_graph_parent_tokens_exact(root: Path) -> Fixture:
+def r17_graph_parent_tokens_exact(root: Path) -> _Fixture:
     fixture = r17_boundary_budget_fixture(
         root, counter="graph_parent_tokens", limit=68, exact=True
     )
@@ -8682,7 +8682,7 @@ def r17_graph_parent_tokens_exact(root: Path) -> Fixture:
     return fixture
 
 
-def r17_graph_parent_tokens_plus_one(root: Path) -> Fixture:
+def r17_graph_parent_tokens_plus_one(root: Path) -> _Fixture:
     fixture = r17_boundary_budget_fixture(
         root, counter="graph_parent_tokens", limit=67
     )
@@ -8699,7 +8699,7 @@ def r17_graph_dimension_budget(
     counter: str,
     limit: int,
     overflow: bool,
-) -> Fixture:
+) -> _Fixture:
     fixture = r17_boundary_budget_fixture(
         root, counter=counter, limit=limit, exact=not overflow
     )
@@ -8719,7 +8719,7 @@ def r17_graph_dimension_budget(
     return fixture
 
 
-def r17_workflow_input_case(root: Path, case: str) -> Fixture:
+def r17_workflow_input_case(root: Path, case: str) -> _Fixture:
     """Bind non-core transport claims to the exact O,N-only API."""
     cases = {
         "fast-forward",
@@ -8740,7 +8740,7 @@ def r17_workflow_input_case(root: Path, case: str) -> Fixture:
         C = repo.commit("create fast-forward input action")
         O = feature(repo, "r17-workflow-fast-forward-old")
         N = feature(repo, "r17-workflow-fast-forward-new")
-        fixture = Fixture(
+        fixture = _Fixture(
             "W0-fast-forward-return",
             repo,
             O,
@@ -8861,7 +8861,7 @@ def r17_workflow_input_case(root: Path, case: str) -> Fixture:
     return fixture
 
 
-def r17_unreadable_boundary(root: Path) -> Fixture:
+def r17_unreadable_boundary(root: Path) -> _Fixture:
     fixture = r17_outside_c_neutral_parent(root)
     boundary = fixture.details["F"]
     hidden, _target = fixture.repo.hide_loose_object(boundary)
@@ -8878,7 +8878,7 @@ def r17_unreadable_boundary(root: Path) -> Fixture:
     return fixture
 
 
-def r17_unopened_outside_c_ancestor(root: Path) -> Fixture:
+def r17_unopened_outside_c_ancestor(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     label = "r17-unopened-outside-c-ancestor"
@@ -8908,7 +8908,7 @@ def r17_unopened_outside_c_ancestor(root: Path) -> Fixture:
     )
     N = feature(repo, f"{label}-task-patch")
     hidden, _target = repo.hide_loose_object(ancestor_blob)
-    return Fixture(
+    return _Fixture(
         "R17-unreadable-outside-C-ancestor-stays-unopened",
         repo,
         C,
@@ -8946,7 +8946,7 @@ def r17_unopened_outside_c_ancestor(root: Path) -> Fixture:
     )
 
 
-def r15_old_side_continuity(root: Path, variant: str) -> Fixture:
+def r15_old_side_continuity(root: Path, variant: str) -> _Fixture:
     """Exercise occurrence integrity on the C-to-O side of the split."""
     variants = {
         "invalid-delete-recreate",
@@ -9033,7 +9033,7 @@ def r15_old_side_continuity(root: Path, variant: str) -> Fixture:
                 details["authority_parent"],
                 details["authority_child"],
             )
-    return Fixture(
+    return _Fixture(
         f"R15-old-{variant}",
         repo,
         C,
@@ -9081,7 +9081,7 @@ def conflicting_human_source(
     }
 
 
-def r3_two_invalid_sources(root: Path) -> Fixture:
+def r3_two_invalid_sources(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     R = repo.commit("create two-invalid pre-C root")
@@ -9121,7 +9121,7 @@ def r3_two_invalid_sources(root: Path) -> Fixture:
         removes=(path,),
     )
     N = feature(repo, "r3-two-invalid-old")
-    return Fixture(
+    return _Fixture(
         "R3-01-two-invalid-causal-sources",
         repo,
         C,
@@ -9156,7 +9156,7 @@ def r3_two_invalid_sources(root: Path) -> Fixture:
     )
 
 
-def r3_invalid_valid_competition(root: Path) -> Fixture:
+def r3_invalid_valid_competition(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     R = repo.commit("create mixed-source pre-C root")
@@ -9196,7 +9196,7 @@ def r3_invalid_valid_competition(root: Path) -> Fixture:
         removes=(path,),
     )
     N = feature(repo, "r3-invalid-valid-old")
-    return Fixture(
+    return _Fixture(
         "R3-02-invalid-valid-causal-competition",
         repo,
         C,
@@ -9222,7 +9222,7 @@ def r3_invalid_valid_competition(root: Path) -> Fixture:
     )
 
 
-def r3_valid_plus_invalid_at_N(root: Path) -> Fixture:
+def r3_valid_plus_invalid_at_N(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     label = "r3-unrelated-invalid"
@@ -9277,7 +9277,7 @@ def r3_valid_plus_invalid_at_N(root: Path) -> Fixture:
         ).returncode
         == 0
     )
-    return Fixture(
+    return _Fixture(
         "R3-03-valid-supplier-plus-invalid-parent-at-N-blocks",
         repo,
         C,
@@ -9345,7 +9345,7 @@ def r4_final_wrapper(
     }
 
 
-def r4_same_root_diamond(root: Path) -> Fixture:
+def r4_same_root_diamond(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     R = repo.commit("create same-root diamond pre-C root")
@@ -9387,7 +9387,7 @@ def r4_same_root_diamond(root: Path) -> Fixture:
     )
     candidate_landmark = final["adoption"]
     N = feature(repo, "r4-same-root-diamond-old")
-    return Fixture(
+    return _Fixture(
         "R4-01-same-root-valid-diamond",
         repo,
         C,
@@ -9428,7 +9428,7 @@ def r4_same_root_diamond(root: Path) -> Fixture:
     )
 
 
-def r4_distinct_root_diamond(root: Path) -> Fixture:
+def r4_distinct_root_diamond(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     R = repo.commit("create distinct-root diamond pre-C root")
@@ -9470,7 +9470,7 @@ def r4_distinct_root_diamond(root: Path) -> Fixture:
     )
     candidate_landmark = final["adoption"]
     N = feature(repo, "r4-distinct-root-diamond-old")
-    return Fixture(
+    return _Fixture(
         "R4-02-distinct-valid-root-diamond",
         repo,
         C,
@@ -9513,7 +9513,7 @@ def r4_distinct_root_diamond(root: Path) -> Fixture:
     )
 
 
-def r4_equal_root_plus_invalid(root: Path) -> Fixture:
+def r4_equal_root_plus_invalid(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     R = repo.commit("create mixed diamond pre-C root")
@@ -9558,7 +9558,7 @@ def r4_equal_root_plus_invalid(root: Path) -> Fixture:
     )
     candidate_landmark = final["adoption"]
     N = feature(repo, "r4-equal-root-plus-invalid-old")
-    return Fixture(
+    return _Fixture(
         "R4-03-equal-root-plus-invalid-diamond",
         repo,
         C,
@@ -9603,7 +9603,7 @@ def r4_equal_root_plus_invalid(root: Path) -> Fixture:
 
 def r5_reintroduced_supplier_history(
     root: Path, *, later_valid: bool
-) -> Fixture:
+) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     suffix = "valid" if later_valid else "invalid"
@@ -9647,7 +9647,7 @@ def r5_reintroduced_supplier_history(
             "delete reintroduced queue occurrence without authority"
         )
     N = feature(repo, f"{label}-old")
-    return Fixture(
+    return _Fixture(
         (
             "R5-02-valid-redelete-after-supplier-reintroduction"
             if later_valid
@@ -9676,7 +9676,7 @@ def r5_reintroduced_supplier_history(
 
 def r6_all_absent_roots(
     root: Path, *, first_valid: bool, second_kind: str
-) -> Fixture:
+) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     label = f"r6-{first_valid}-{second_kind}"
@@ -9728,7 +9728,7 @@ def r6_all_absent_roots(
         (True, "ambiguous"): "R6-02-valid-plus-ambiguous-all-absent",
         (False, "invalid"): "R6-03-two-invalid-all-absent",
     }[(first_valid, second_kind)]
-    return Fixture(
+    return _Fixture(
         scenario,
         repo,
         C,
@@ -9757,7 +9757,7 @@ def r6_all_absent_roots(
     )
 
 
-def r6_same_root_all_absent_wrappers(root: Path) -> Fixture:
+def r6_same_root_all_absent_wrappers(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     label = "r6-same-root-all-absent"
@@ -9790,7 +9790,7 @@ def r6_same_root_all_absent_wrappers(root: Path) -> Fixture:
         removes=(path,),
     )
     N = feature(repo, f"{label}-old")
-    return Fixture(
+    return _Fixture(
         "R6-04-same-valid-root-all-absent-wrappers",
         repo,
         C,
@@ -9830,7 +9830,7 @@ def generated_retry(repo: GitRepository, bad_path: str):
     return path
 
 
-def pcx15_generated_retry(root: Path) -> Fixture:
+def pcx15_generated_retry(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     bad = "message-queue/needs-agent/requests/bad.md"
@@ -9856,7 +9856,7 @@ def pcx15_generated_retry(root: Path) -> Fixture:
         retry,
         repo.rendered_retries[retry],
     )
-    return Fixture(
+    return _Fixture(
         "PCX-15-generated-retry-supplier",
         repo,
         C,
@@ -9915,7 +9915,7 @@ def complete_pickup(
     repo.remove(pickup)
 
 
-def pcx16_task_pickup(root: Path) -> Fixture:
+def pcx16_task_pickup(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     pickup, backlog, active = add_pickup(repo, "pcx16")
@@ -9933,7 +9933,7 @@ def pcx16_task_pickup(root: Path) -> Fixture:
         removes=(pickup,),
     )
     N = feature(repo, "pcx16-old")
-    return Fixture(
+    return _Fixture(
         "PCX-16-task-pickup-supplier",
         repo,
         C,
@@ -9945,7 +9945,7 @@ def pcx16_task_pickup(root: Path) -> Fixture:
     )
 
 
-def r16_supplier_support_fixture(root: Path, variant: str) -> Fixture:
+def r16_supplier_support_fixture(root: Path, variant: str) -> _Fixture:
     """Exercise exact source support copying without carrier authority."""
     variants = {
         "forward": "no-finding",
@@ -10073,7 +10073,7 @@ def r16_supplier_support_fixture(root: Path, variant: str) -> Fixture:
             authority_parent,
             authority_child,
         )
-    return Fixture(
+    return _Fixture(
         f"R16-support-{variant}",
         repo,
         C,
@@ -10093,7 +10093,7 @@ def r16_supplier_support_fixture(root: Path, variant: str) -> Fixture:
     )
 
 
-def r16_earlier_evidence_reversal(root: Path) -> Fixture:
+def r16_earlier_evidence_reversal(root: Path) -> _Fixture:
     """Prove generic root replay cannot authorize an evidence reversal."""
     repo = GitRepository(root)
     initialize(repo)
@@ -10151,7 +10151,7 @@ def r16_earlier_evidence_reversal(root: Path) -> Fixture:
         replay_problem = RECONCILE.queue_deletion_problem(
             path, authority_text, authority_parent, candidate_landmark
         )
-    return Fixture(
+    return _Fixture(
         "R16-earlier-landed-evidence-reversal",
         repo,
         C,
@@ -10174,7 +10174,7 @@ def r16_earlier_evidence_reversal(root: Path) -> Fixture:
 
 def r16_pickup_evolution(
     root: Path, target_status: str, *, drop_artifact: bool = False
-) -> Fixture:
+) -> _Fixture:
     """Exercise typed monotone pickup support beyond 1_in-progress."""
     allowed = {"2_blocked", "3_in-review", "4_done", "0_backlog"}
     if target_status not in allowed:
@@ -10221,7 +10221,7 @@ def r16_pickup_evolution(
         removes=(pickup, backlog, active),
     )
     N = feature(repo, f"r16-pickup-{slug}-new")
-    return Fixture(
+    return _Fixture(
         f"R16-pickup-evolution-{slug}"
         + ("-drop-artifact" if drop_artifact else ""),
         repo,
@@ -10246,7 +10246,7 @@ def r16_pickup_evolution(
     )
 
 
-def p19_identities(root: Path) -> Fixture:
+def p19_identities(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     text = agent_text("p19")
@@ -10272,7 +10272,7 @@ def p19_identities(root: Path) -> Fixture:
     )
     retry_text = repo.read(retry)
     retry_identity = RECONCILE.queue_action_identity(retry, retry_text)
-    return Fixture(
+    return _Fixture(
         "P19-production-identities",
         repo,
         C,
@@ -10295,7 +10295,7 @@ def p19_identities(root: Path) -> Fixture:
     )
 
 
-def p20_lifecycle_types(root: Path) -> Fixture:
+def p20_lifecycle_types(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     agent_label = "p20-agent"
@@ -10328,7 +10328,7 @@ def p20_lifecycle_types(root: Path) -> Fixture:
     repo.remove(retry)
     candidate_landmark = repo.commit("resolve every lifecycle type")
     N = feature(repo, "p20-old")
-    return Fixture(
+    return _Fixture(
         "P20-lifecycle-types",
         repo,
         C,
@@ -10349,7 +10349,7 @@ def p20_lifecycle_types(root: Path) -> Fixture:
     )
 
 
-def pcx17_cherry_pick(root: Path, mode: str) -> Fixture:
+def pcx17_cherry_pick(root: Path, mode: str) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     path = add_agent(repo, f"pcx17-{mode}")
@@ -10391,7 +10391,7 @@ def pcx17_cherry_pick(root: Path, mode: str) -> Fixture:
     else:
         raise ValueError(mode)
     N = feature(repo, f"{label}-old")
-    return Fixture(
+    return _Fixture(
         (
             "P21-PCX-17c-squash-erasure"
             if mode == "squash"
@@ -10407,7 +10407,7 @@ def pcx17_cherry_pick(root: Path, mode: str) -> Fixture:
     )
 
 
-def pcx18_many_actions(root: Path) -> Fixture:
+def pcx18_many_actions(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     actions = []
@@ -10435,7 +10435,7 @@ def pcx18_many_actions(root: Path) -> Fixture:
         repo.remove(path)
     candidate_landmark = repo.commit("delete all sixteen actions")
     N = feature(repo, "many-old")
-    return Fixture(
+    return _Fixture(
         "P22-PCX-18-one-pass-many-actions",
         repo,
         C,
@@ -10452,10 +10452,10 @@ def pcx18_many_actions(root: Path) -> Fixture:
     )
 
 
-def r17_precharge_many_actions_budget(root: Path) -> Fixture:
+def r17_precharge_many_actions_budget(root: Path) -> _Fixture:
     """Refuse P22's first over-budget operation before later work starts."""
     fixture = pcx18_many_actions(root)
-    reference = run_classifier(fixture)["metrics"]
+    reference = _run_classifier(fixture)["metrics"]
     fixture.scenario = "R17-precharge-P22-budget"
     fixture.expected = "blocking-finding"
     fixture.budget_limits = {"object_reads": 133}
@@ -10477,7 +10477,7 @@ def r17_precharge_many_actions_budget(root: Path) -> Fixture:
     return fixture
 
 
-def p18_missing_tip(root: Path) -> Fixture:
+def p18_missing_tip(root: Path) -> _Fixture:
     fixture = ordinary_linear_fixture(
         root, "P18a-missing-tip", valid=True
     )
@@ -10486,7 +10486,7 @@ def p18_missing_tip(root: Path) -> Fixture:
     return fixture
 
 
-def p18_noncommit_tip(root: Path) -> Fixture:
+def p18_noncommit_tip(root: Path) -> _Fixture:
     fixture = ordinary_linear_fixture(
         root, "P18b-noncommit-tip", valid=True
     )
@@ -10497,7 +10497,7 @@ def p18_noncommit_tip(root: Path) -> Fixture:
     return fixture
 
 
-def p18_unrelated_tip(root: Path) -> Fixture:
+def p18_unrelated_tip(root: Path) -> _Fixture:
     fixture = ordinary_linear_fixture(
         root, "P18c-unrelated-tip", valid=True
     )
@@ -10511,7 +10511,7 @@ def p18_unrelated_tip(root: Path) -> Fixture:
     return fixture
 
 
-def p18_shallow(root: Path) -> Fixture:
+def p18_shallow(root: Path) -> _Fixture:
     fixture = ordinary_linear_fixture(
         root, "P18d-shallow-required-region", valid=True
     )
@@ -10522,7 +10522,7 @@ def p18_shallow(root: Path) -> Fixture:
     return fixture
 
 
-def p18_missing_blob(root: Path) -> Fixture:
+def p18_missing_blob(root: Path) -> _Fixture:
     fixture = ordinary_linear_fixture(
         root, "P18e-missing-queue-blob", valid=True
     )
@@ -10534,7 +10534,7 @@ def p18_missing_blob(root: Path) -> Fixture:
     return fixture
 
 
-def p18_missing_tree(root: Path) -> Fixture:
+def p18_missing_tree(root: Path) -> _Fixture:
     fixture = ordinary_linear_fixture(
         root, "P18f-missing-queue-tree", valid=True
     )
@@ -10547,7 +10547,7 @@ def p18_missing_tree(root: Path) -> Fixture:
     return fixture
 
 
-def p18_multiple_bases(root: Path) -> Fixture:
+def p18_multiple_bases(root: Path) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     add_agent(repo, "p18g")
@@ -10567,7 +10567,7 @@ def p18_multiple_bases(root: Path) -> Fixture:
     repo.branch("candidate", Y)
     candidate_landmark = feature(repo, "p18g-base")
     N = feature(repo, "p18g-old")
-    return Fixture(
+    return _Fixture(
         "P18g-multiple-merge-bases",
         repo,
         R,
@@ -10579,7 +10579,7 @@ def p18_multiple_bases(root: Path) -> Fixture:
     )
 
 
-def pcx19_missing_claim_blob(root: Path) -> Fixture:
+def pcx19_missing_claim_blob(root: Path) -> _Fixture:
     fixture = ordinary_linear_fixture(
         root, "PCX-19-missing-claim-blob-recovery", valid=True
     )
@@ -10607,7 +10607,7 @@ def pcx19_missing_claim_blob(root: Path) -> Fixture:
     return fixture
 
 
-def budget_fixture(root: Path, *, overflow: bool) -> Fixture:
+def budget_fixture(root: Path, *, overflow: bool) -> _Fixture:
     scenario = (
         "PCX-20b-budget-overflow"
         if overflow
@@ -10627,7 +10627,7 @@ def budget_fixture(root: Path, *, overflow: bool) -> Fixture:
         repo, ((scenario.lower(), path),), "budget fixture deletion"
     )
     N = feature(repo, "budget-old")
-    fixture = Fixture(
+    fixture = _Fixture(
         scenario,
         repo,
         C,
@@ -10636,7 +10636,7 @@ def budget_fixture(root: Path, *, overflow: bool) -> Fixture:
         N,
         "no-finding",
     )
-    probe = run_classifier(fixture)
+    probe = _run_classifier(fixture)
     measured = probe["metrics"]
     max_work = max(measured.values())
     fixture.expected = "blocking-finding" if overflow else "no-finding"
@@ -10654,15 +10654,15 @@ def budget_fixture(root: Path, *, overflow: bool) -> Fixture:
     return fixture
 
 
-def configure_typed_budget_fixture(
-    fixture: Fixture,
+def _configure_typed_budget_fixture(
+    fixture: _Fixture,
     *,
     scenario: str,
     counter: str,
     overflow: bool,
-) -> Fixture:
+) -> _Fixture:
     """Derive one deterministic exact or exact-minus-one typed work cap."""
-    probe = run_classifier(fixture)
+    probe = _run_classifier(fixture)
     if probe["classification"] != fixture.expected:
         raise AssertionError(
             f"unbudgeted probe for {scenario} changed classification"
@@ -10686,7 +10686,7 @@ def configure_typed_budget_fixture(
     return fixture
 
 
-def r17_large_object_budget(root: Path, *, overflow: bool) -> Fixture:
+def r17_large_object_budget(root: Path, *, overflow: bool) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     label = "r17-large-object"
@@ -10709,7 +10709,7 @@ def r17_large_object_budget(root: Path, *, overflow: bool) -> Fixture:
         repo, ((label, path),), "delete large queue object"
     )
     N = feature(repo, "r17-large-object-old")
-    fixture = Fixture(
+    fixture = _Fixture(
         "probe-large-object",
         repo,
         C,
@@ -10719,7 +10719,7 @@ def r17_large_object_budget(root: Path, *, overflow: bool) -> Fixture:
         "no-finding",
         {"largest_queue_blob_bytes": target_bytes},
     )
-    return configure_typed_budget_fixture(
+    return _configure_typed_budget_fixture(
         fixture,
         scenario=(
             "R17-object-payload-peak-plus-one-refused"
@@ -10731,7 +10731,7 @@ def r17_large_object_budget(root: Path, *, overflow: bool) -> Fixture:
     )
 
 
-def r17_wide_tree_budget(root: Path, *, overflow: bool) -> Fixture:
+def r17_wide_tree_budget(root: Path, *, overflow: bool) -> _Fixture:
     repo = GitRepository(root)
     initialize(repo)
     label = "r17-wide-tree"
@@ -10747,7 +10747,7 @@ def r17_wide_tree_budget(root: Path, *, overflow: bool) -> Fixture:
         repo, ((label, path),), "delete action beside wide tree"
     )
     N = feature(repo, "r17-wide-tree-old")
-    fixture = Fixture(
+    fixture = _Fixture(
         "probe-wide-tree",
         repo,
         C,
@@ -10757,7 +10757,7 @@ def r17_wide_tree_budget(root: Path, *, overflow: bool) -> Fixture:
         "no-finding",
         {"fixture_leaf_paths": 1000},
     )
-    return configure_typed_budget_fixture(
+    return _configure_typed_budget_fixture(
         fixture,
         scenario=(
             "R17-flat-tree-peak-plus-one-refused"
@@ -10771,11 +10771,11 @@ def r17_wide_tree_budget(root: Path, *, overflow: bool) -> Fixture:
 
 def r17_support_serialization_budget(
     root: Path, *, overflow: bool
-) -> Fixture:
+) -> _Fixture:
     fixture = ordinary_linear_fixture(
         root, "probe-support-serialization", valid=True
     )
-    return configure_typed_budget_fixture(
+    return _configure_typed_budget_fixture(
         fixture,
         scenario=(
             "R17-support-serialized-plus-one-refused"
@@ -10787,9 +10787,9 @@ def r17_support_serialization_budget(
     )
 
 
-def r17_dynamic_support_budget(root: Path, *, overflow: bool) -> Fixture:
+def r17_dynamic_support_budget(root: Path, *, overflow: bool) -> _Fixture:
     fixture = pcx16_task_pickup(root)
-    return configure_typed_budget_fixture(
+    return _configure_typed_budget_fixture(
         fixture,
         scenario=(
             "R17-dynamic-support-traversal-plus-one-refused"
@@ -10801,14 +10801,14 @@ def r17_dynamic_support_budget(root: Path, *, overflow: bool) -> Fixture:
     )
 
 
-def r18_origin_fixture(
+def _r18_origin_fixture(
     root: Path,
     *,
     case: str,
     strategy: str = "U",
     reverse_parents: bool = False,
     interpretation: str | None = None,
-) -> Fixture:
+) -> _Fixture:
     """Build one absent-at-C, live-incarnation Strategy U/B fixture."""
     repo = GitRepository(root)
     initialize(repo)
@@ -11453,7 +11453,7 @@ def r18_origin_fixture(
         f"R18-{strategy}-{case}"
         + ("-reversed" if reverse_parents else "")
     )
-    return Fixture(
+    return _Fixture(
         scenario,
         repo,
         C,
@@ -11474,19 +11474,19 @@ def r18_origin_fixture(
     )
 
 
-def r18_origin_budget_fixture(
+def _r18_origin_budget_fixture(
     root: Path,
     *,
     counter: str,
     overflow: bool,
-) -> Fixture:
+) -> _Fixture:
     strategy = "B" if counter == "origin_witness_bytes" else "U"
-    fixture = r18_origin_fixture(
+    fixture = _r18_origin_fixture(
         root,
         case="normal-base-advance-replay",
         strategy=strategy,
     )
-    probe = run_classifier(fixture)
+    probe = _run_classifier(fixture)
     measured = probe["metrics"][counter]
     if measured <= 0:
         raise AssertionError(f"origin budget counter {counter} was not exercised")
@@ -11513,7 +11513,7 @@ def r19_event_workflow_fixture(
     transport: str,
     attack: bool = False,
     failure: str | None = None,
-) -> Fixture:
+) -> _Fixture:
     """Drive a real typed-U restack from one immutable event payload."""
     if transport not in {
         "local", "pre-push", "push", "pull-request-synchronize"
@@ -11523,7 +11523,7 @@ def r19_event_workflow_fixture(
         raise ValueError("a workflow fixture cannot be attack and input failure")
 
     if failure is None:
-        fixture = r18_origin_fixture(
+        fixture = _r18_origin_fixture(
             root,
             case="delete-recreate-N" if attack else "normal-base-advance-replay",
             strategy="U",
@@ -11591,7 +11591,7 @@ def r19_event_workflow_fixture(
     return fixture
 
 
-def scenario_builders():
+def _scenario_builders():
     return [
         lambda root: ordinary_linear_fixture(
             root, "P1-direct-linear-valid", valid=True
@@ -11980,7 +11980,7 @@ def scenario_builders():
         *[
             (
                 lambda root, strategy=strategy:
-                r18_origin_fixture(
+                _r18_origin_fixture(
                     root,
                     case="normal-base-advance-replay",
                     strategy=strategy,
@@ -11991,7 +11991,7 @@ def scenario_builders():
         *[
             (
                 lambda root, strategy=strategy:
-                r18_origin_fixture(
+                _r18_origin_fixture(
                     root,
                     case="independent-birth",
                     strategy=strategy,
@@ -11999,13 +11999,13 @@ def scenario_builders():
             )
             for strategy in ("U", "B")
         ],
-        lambda root: r18_origin_fixture(
+        lambda root: _r18_origin_fixture(
             root, case="O-only-post-C-loss"
         ),
         *[
             (
                 lambda root, case=case:
-                r18_origin_fixture(root, case=case)
+                _r18_origin_fixture(root, case=case)
             )
             for case in (
                 "delete-recreate-O",
@@ -12026,7 +12026,7 @@ def scenario_builders():
         *[
             (
                 lambda root, strategy=strategy:
-                r18_origin_fixture(
+                _r18_origin_fixture(
                     root, case="exact-cherry-pick", strategy=strategy
                 )
             )
@@ -12035,7 +12035,7 @@ def scenario_builders():
         *[
             (
                 lambda root, case=case, strategy=strategy:
-                r18_origin_fixture(
+                _r18_origin_fixture(
                     root,
                     case=case,
                     strategy=strategy,
@@ -12052,7 +12052,7 @@ def scenario_builders():
         *[
             (
                 lambda root, strategy=strategy:
-                r18_origin_fixture(
+                _r18_origin_fixture(
                     root,
                     case="review-publication-equivalence",
                     strategy=strategy,
@@ -12067,7 +12067,7 @@ def scenario_builders():
         *[
             (
                 lambda root, strategy=strategy:
-                r18_origin_fixture(
+                _r18_origin_fixture(
                     root, case="rename-timing-move", strategy=strategy
                 )
             )
@@ -12076,15 +12076,15 @@ def scenario_builders():
         *[
             (
                 lambda root, case=case, strategy=strategy:
-                r18_origin_fixture(root, case=case, strategy=strategy)
+                _r18_origin_fixture(root, case=case, strategy=strategy)
             )
             for case in ("generated-retry", "task-pickup")
             for strategy in ("U", "B")
         ],
-        lambda root: r18_origin_fixture(
+        lambda root: _r18_origin_fixture(
             root, case="review-compatible-merge"
         ),
-        lambda root: r18_origin_fixture(
+        lambda root: _r18_origin_fixture(
             root,
             case="review-compatible-merge",
             reverse_parents=True,
@@ -12092,7 +12092,7 @@ def scenario_builders():
         *[
             (
                 lambda root, case=case, reverse=reverse:
-                r18_origin_fixture(
+                _r18_origin_fixture(
                     root,
                     case=case,
                     reverse_parents=reverse,
@@ -12104,23 +12104,23 @@ def scenario_builders():
             )
             for reverse in (False, True)
         ],
-        lambda root: r18_origin_fixture(
+        lambda root: _r18_origin_fixture(
             root, case="review-three-carrying-parents"
         ),
-        lambda root: r18_origin_fixture(
+        lambda root: _r18_origin_fixture(
             root, case="review-two-valid-sources"
         ),
-        lambda root: r18_origin_fixture(
+        lambda root: _r18_origin_fixture(
             root, case="review-duplicate-parent-header"
         ),
-        lambda root: r18_origin_fixture(
+        lambda root: _r18_origin_fixture(
             root, case="review-incompatible-carrier"
         ),
-        lambda root: r18_origin_fixture(root, case="parent-order"),
-        lambda root: r18_origin_fixture(
+        lambda root: _r18_origin_fixture(root, case="parent-order"),
+        lambda root: _r18_origin_fixture(
             root, case="parent-order", reverse_parents=True
         ),
-        lambda root: r18_origin_fixture(root, case="unreadable-object"),
+        lambda root: _r18_origin_fixture(root, case="unreadable-object"),
         *[
             (
                 lambda root, transport=transport, attack=attack:
@@ -12152,7 +12152,7 @@ def scenario_builders():
         *[
             (
                 lambda root, counter=counter, overflow=overflow:
-                r18_origin_budget_fixture(
+                _r18_origin_budget_fixture(
                     root, counter=counter, overflow=overflow
                 )
             )
@@ -12268,7 +12268,7 @@ SCENARIO_ALIASES = {
 }
 
 
-def run_fixture(fixture: Fixture, damage: Damage | None = None):
+def _run_fixture(fixture: _Fixture, damage: Damage | None = None):
     adapter_input = fixture.details.get("event_adapter_input")
     if adapter_input is not None:
         if damage is not None:
@@ -12284,10 +12284,10 @@ def run_fixture(fixture: Fixture, damage: Damage | None = None):
         result["details"] = fixture.details
         return result
     if "restore_hidden" not in fixture.details:
-        result = run_classifier(fixture, damage)
+        result = _run_classifier(fixture, damage)
         workflow = fixture.details.get("workflow_contract", {})
         if workflow.get("repeat_exact_inputs") and damage is None:
-            repeated = run_classifier(fixture)
+            repeated = _run_classifier(fixture)
             result["workflow_input_evidence"] = {
                 "exact_O_N_repeated": [fixture.O, fixture.N],
                 "raw_results_equal": result == repeated,
@@ -12309,7 +12309,7 @@ def run_fixture(fixture: Fixture, damage: Damage | None = None):
     except Unreadable as error:
         first_reader_reason = str(error)
     missing_cached = missing_oid in reader.objects
-    first = run_classifier(fixture)
+    first = _run_classifier(fixture)
     hidden = fixture.repo.root / fixture.details["restore_hidden"]
     target = fixture.repo.root / fixture.details["restore_target"]
     if hidden.is_file():
@@ -12324,7 +12324,7 @@ def run_fixture(fixture: Fixture, damage: Damage | None = None):
         )
     finally:
         reader_session.close()
-    second = run_classifier(fixture)
+    second = _run_classifier(fixture)
     second["recovery"] = {
         "first_status": first["evidence_verdict"]["status"],
         "first_reason": first["evidence_verdict"]["reason"],
@@ -13547,18 +13547,18 @@ def validate_result(result: dict):
             or len(propagation)
             != (1 if details["mode"] == "supplier" else 0)
             or "old-tip-human-binding-conflict" in reason_codes
-            or not Classifier.explicit_review_pending(
+            or not _Classifier.explicit_review_pending(
                 details["old_pending_value"]
             )
-            or Classifier.explicit_review_pending(
+            or _Classifier.explicit_review_pending(
                 details["candidate_value"]
             )
             or not all(
-                Classifier.explicit_review_pending(value)
+                _Classifier.explicit_review_pending(value)
                 for value in pending_presentations
             )
             or any(
-                Classifier.explicit_review_pending(value)
+                _Classifier.explicit_review_pending(value)
                 for value in concrete_or_invalid_values
             )
         ):
@@ -13596,8 +13596,8 @@ def validate_result(result: dict):
             != (1 if details["mode"] == "supplier" else 0)
             or old_reason_token not in action["reason"]
             or details["candidate_value"] not in action["reason"]
-            or Classifier.explicit_review_pending(details["old_value"])
-            or not Classifier.broad_review_pending(details["old_value"])
+            or _Classifier.explicit_review_pending(details["old_value"])
+            or not _Classifier.broad_review_pending(details["old_value"])
         ):
             errors.append("R10 malformed review binding was normalized")
     if scenario.startswith("R13-") and "review-binding" in scenario:
@@ -14737,7 +14737,7 @@ def control_builder(name: str, root: Path):
         )
     if name == "endpoint-only-origin-equality":
         return (
-            r18_origin_fixture(
+            _r18_origin_fixture(
                 root, case="transient-protected-mutation"
             ),
             Damage(endpoint_only_origin_equality=True),
@@ -14745,13 +14745,13 @@ def control_builder(name: str, root: Path):
         )
     if name == "skip-origin-birth-uniqueness":
         return (
-            r18_origin_fixture(root, case="second-birth"),
+            _r18_origin_fixture(root, case="second-birth"),
             Damage(skip_origin_birth_uniqueness=True),
             "no-finding",
         )
     if name == "skip-origin-post-birth-absence":
         return (
-            r18_origin_fixture(
+            _r18_origin_fixture(
                 root, case="inherited-then-deleted-merge-arm"
             ),
             Damage(skip_origin_post_birth_absence=True),
@@ -14759,17 +14759,66 @@ def control_builder(name: str, root: Path):
         )
     if name == "skip-origin-endpoint-non-regression":
         return (
-            r18_origin_fixture(root, case="endpoint-regression"),
+            _r18_origin_fixture(root, case="endpoint-regression"),
             Damage(skip_origin_endpoint_non_regression=True),
             "no-finding",
         )
     if name == "reject-all-origin-invalid-carriers":
         return (
-            r18_origin_fixture(root, case="review-compatible-merge"),
+            _r18_origin_fixture(root, case="review-compatible-merge"),
             Damage(reject_all_origin_invalid_carriers=True),
             "blocking-finding",
         )
     raise ValueError(name)
+
+
+_INTENDED_PUBLIC_API = (
+    "EventEndpoints",
+    "EventInputError",
+    "GitSpawnObserver",
+    "TrustedGitRunner",
+    "audit_event",
+    "event_endpoints",
+    "main",
+)
+
+
+def _public_strategy_exposures(namespace: Mapping[str, Any]) -> list[str]:
+    """Name public local callables exposing Strategy B selection."""
+    exposed = []
+    for name, subject in namespace.items():
+        if name.startswith("_") or not callable(subject):
+            continue
+        if getattr(subject, "__module__", None) != __name__:
+            continue
+        try:
+            parameters = inspect.signature(subject).parameters
+            source = inspect.getsource(subject)
+        except (OSError, TypeError, ValueError):
+            continue
+        if (
+            "origin_strategy" in parameters
+            or any(
+                parameter.annotation in {"_Fixture", _Fixture}
+                for parameter in parameters.values()
+            )
+            or '"B"' in source
+            or "'B'" in source
+        ):
+            exposed.append(name)
+    return sorted(exposed)
+
+
+def _public_private_aliases(
+    namespace: Mapping[str, Any], private_subjects: tuple[Any, ...]
+) -> list[str]:
+    """Name public aliases of private Strategy B diagnostic surfaces."""
+    return sorted(
+        name
+        for name, subject in namespace.items()
+        if not name.startswith("_")
+        and any(subject is private for private in private_subjects)
+    )
 
 
 def _event_adapter_control(root: Path) -> dict:
@@ -14788,6 +14837,7 @@ def _event_adapter_control(root: Path) -> dict:
         ),
     }
     clean_input = fixtures["clean"].details["event_adapter_input"]
+    blocking_input = fixtures["blocking"].details["event_adapter_input"]
 
     def process_is_gone(pid):
         try:
@@ -14853,6 +14903,8 @@ def _event_adapter_control(root: Path) -> dict:
     ):
         before_spawns = []
         after_spawns = []
+        observed_sessions = []
+        observation_order = []
         lifecycle = {
             "factory": 0,
             "enter": 0,
@@ -14866,6 +14918,7 @@ def _event_adapter_control(root: Path) -> dict:
         private_before = {
             key for key in sys.modules if key.startswith(private_prefix)
         }
+        active_reconciler_before = ACTIVE_RECONCILE.get()
         active_runner = (
             runner
             if runner is not None
@@ -14912,6 +14965,16 @@ def _event_adapter_control(root: Path) -> dict:
         class AccountingObserver:
             def before_spawn(self, command):
                 before_spawns.append(command)
+                active_reconciler = ACTIVE_RECONCILE.get()
+                active_session = getattr(
+                    getattr(active_reconciler, "subprocess", None),
+                    "_session",
+                    None,
+                )
+                if active_session is not None and all(
+                    active_session is not item for item in observed_sessions
+                ):
+                    observed_sessions.append(active_session)
 
             def after_spawn(self, command, pid):
                 after_spawns.append((command, pid))
@@ -14923,6 +14986,7 @@ def _event_adapter_control(root: Path) -> dict:
 
         class Transaction:
             def __enter__(self):
+                observation_order.append("transaction-enter")
                 lifecycle["enter"] += 1
                 if transaction_stage == "enter":
                     raise transaction_failure
@@ -14935,6 +14999,7 @@ def _event_adapter_control(root: Path) -> dict:
                 return AccountingObserver()
 
             def __exit__(self, exc_type, exc, traceback):
+                observation_order.append("transaction-exit")
                 lifecycle["exit"] += 1
                 lifecycle["exit_exception"] = (
                     exc_type.__name__ if exc_type is not None else None
@@ -14947,6 +15012,7 @@ def _event_adapter_control(root: Path) -> dict:
                 return truthy_exit
 
         def transaction():
+            observation_order.append("transaction-factory")
             lifecycle["factory"] += 1
             if transaction_stage == "factory":
                 raise transaction_failure
@@ -14977,8 +15043,10 @@ def _event_adapter_control(root: Path) -> dict:
                 budget_limit=budget_limit,
                 transaction=transaction,
             )
+            observation_order.append("audit-returned")
         except BaseException as error:
             caught = error
+            observation_order.append("audit-raised")
         finally:
             sys.settrace(None)
         gc.collect()
@@ -14988,6 +15056,7 @@ def _event_adapter_control(root: Path) -> dict:
         }
         observed_pids = [pid for _command, pid in after_spawns]
         metrics = result.get("metrics", {}) if result is not None else {}
+        observation_order.append("metrics-read")
         runner_calls = getattr(active_runner, "calls", ())
         runner_created = getattr(active_runner, "created", ())
         canonical_json_serializable = False
@@ -15022,6 +15091,7 @@ def _event_adapter_control(root: Path) -> dict:
                 for pid in getattr(active_runner, "created", ())
             ),
             "attempts": metrics.get("git_process_attempts"),
+            "actual": metrics.get("git_processes"),
             "audit_exit": (
                 result.get("audit_exit") if result is not None else None
             ),
@@ -15036,6 +15106,34 @@ def _event_adapter_control(root: Path) -> dict:
                 == [command for command, _pid in after_spawns]
             ),
             "created": metrics.get("git_processes"),
+            "cache_state": {
+                "active_reconciler_restored": (
+                    ACTIVE_RECONCILE.get() is active_reconciler_before
+                ),
+                "carry_cache_entries": sum(
+                    len(session.carry_proof_cache)
+                    for session in observed_sessions
+                ),
+                "object_databases_detached": all(
+                    session.object_database is None
+                    for session in observed_sessions
+                ),
+                "owners": len(observed_sessions),
+                "owners_closed": all(
+                    session._closed for session in observed_sessions
+                ),
+                "pipe_registries_empty": all(
+                    not session.explicit_pipe_resources
+                    for session in observed_sessions
+                ),
+                "process_registries_empty": all(
+                    not session.processes for session in observed_sessions
+                ),
+                "reconciler_modules_detached": all(
+                    session.reconcile is None
+                    for session in observed_sessions
+                ),
+            },
             "fd_delta": (
                 descriptors_after - descriptors_before
                 if descriptors_before is not None
@@ -15043,6 +15141,7 @@ def _event_adapter_control(root: Path) -> dict:
                 else None
             ),
             "lifecycle": lifecycle,
+            "observation_order": observation_order,
             "private_modules_leaked": sorted(
                 private_after - private_before
             ),
@@ -15100,12 +15199,25 @@ def _event_adapter_control(root: Path) -> dict:
             adapter_input["payload"],
             git_runner=_trusted_git_runner(),
         )
+        imported_bytes = json.dumps(
+            imported_result,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8") + b"\n"
         observations[label] = {
             "adapter_status": cli_result.get("event_adapter", {}).get(
                 "status"
             ),
             "classification": cli_result.get("classification"),
+            "cli_bytes_sha256": "sha256:" + hashlib.sha256(
+                completed.stdout
+            ).hexdigest(),
             "exit": completed.returncode,
+            "import_bytes_sha256": "sha256:" + hashlib.sha256(
+                imported_bytes
+            ).hexdigest(),
+            "import_cli_bytes_equal": completed.stdout == imported_bytes,
             "stdout_canonical": (
                 bool(cli_result)
                 and completed.stdout
@@ -15169,7 +15281,21 @@ def _event_adapter_control(root: Path) -> dict:
         "valid": seam_probe(
             clean_input["event_kind"], clean_input["payload"]
         ),
+        "blocking": seam_probe(
+            blocking_input["event_kind"],
+            blocking_input["payload"],
+            repository=fixtures["blocking"].repo.root,
+        ),
         "invalid": seam_probe("local", {"new": "1" * 40}),
+    }
+    execution_seam["blocking"]["cli_import_byte_parity"] = {
+        "bytes_equal": observations["blocking"][
+            "import_cli_bytes_equal"
+        ],
+        "cli_sha256": observations["blocking"]["cli_bytes_sha256"],
+        "import_sha256": observations["blocking"][
+            "import_bytes_sha256"
+        ],
     }
     same_oid = fixtures["clean"].O
     execution_seam["identical_endpoint_rejections"] = {
@@ -15746,8 +15872,39 @@ def _event_adapter_control(root: Path) -> dict:
             bounded_git_lines,
             ObjectDatabase,
             Graph,
-            Classifier,
+            _Classifier,
         )
+    )
+    private_strategy_surfaces = (
+        _Fixture,
+        _Classifier,
+        _run_classifier,
+        _r18_origin_fixture,
+        _r18_origin_budget_fixture,
+        _scenario_builders,
+        _configure_typed_budget_fixture,
+        _run_fixture,
+        _run_suite,
+    )
+    intended_public_namespace = {
+        name: globals()[name] for name in _INTENDED_PUBLIC_API
+    }
+
+    def public_origin_selector(origin_strategy="U"):
+        return origin_strategy
+
+    def public_b_selector(strategy="B"):
+        return strategy
+
+    def public_fixture_runner(fixture: _Fixture):
+        return fixture
+
+    public_guard_probe = _public_strategy_exposures(
+        {
+            "public_b_selector": public_b_selector,
+            "public_fixture_runner": public_fixture_runner,
+            "public_origin_selector": public_origin_selector,
+        }
     )
     execution_seam["static_contract"] = {
         "ambient_popen_assignment_absent": re.search(
@@ -15766,7 +15923,7 @@ def _event_adapter_control(root: Path) -> dict:
             for name in ("REAL_" + "POPEN", "REAL_" + "RUN")
         ),
         "classifier_session_has_no_default": (
-            "session" not in (Classifier.__init__.__kwdefaults__ or {})
+            "session" not in (_Classifier.__init__.__kwdefaults__ or {})
         ),
         "active_reconciler_has_no_default": (
             ("BASE_" + "RECONCILE") not in source
@@ -15801,7 +15958,7 @@ def _event_adapter_control(root: Path) -> dict:
         "internal_sessions_have_no_default": all(
             inspect.signature(subject).parameters["session"].default
             is inspect.Parameter.empty
-            for subject in (Classifier, Graph, ObjectDatabase, spawn_git_process)
+            for subject in (_Classifier, Graph, ObjectDatabase, spawn_git_process)
         ),
         "main_runner_has_no_default": (
             "git_runner" not in (main.__kwdefaults__ or {})
@@ -15815,6 +15972,27 @@ def _event_adapter_control(root: Path) -> dict:
             r"^def ordinary_audit\(", source, re.MULTILINE
         )
         is None,
+        "intended_public_api_strategy_u_only": (
+            tuple(sorted(intended_public_namespace))
+            == tuple(sorted(_INTENDED_PUBLIC_API))
+            and not _public_strategy_exposures(
+                intended_public_namespace
+            )
+        ),
+        "private_strategy_surface_no_public_aliases": not (
+            _public_private_aliases(
+                globals(), private_strategy_surfaces
+            )
+        ),
+        "public_strategy_guard_observed_red": public_guard_probe
+        == [
+            "public_b_selector",
+            "public_fixture_runner",
+            "public_origin_selector",
+        ],
+        "public_strategy_selector_absent": not (
+            _public_strategy_exposures(globals())
+        ),
         "public_strategy_surface_u_only": (
             "origin_strategy" not in inspect.signature(audit_event).parameters
             and "origin_strategy" not in inspect.signature(main).parameters
@@ -15905,6 +16083,17 @@ def _event_adapter_control(root: Path) -> dict:
         )
 
     valid = execution_seam["valid"]
+    blocking = execution_seam["blocking"]
+    clean_cache_state = {
+        "active_reconciler_restored": True,
+        "carry_cache_entries": 0,
+        "object_databases_detached": True,
+        "owners": 1,
+        "owners_closed": True,
+        "pipe_registries_empty": True,
+        "process_registries_empty": True,
+        "reconciler_modules_detached": True,
+    }
     observed = bool(
         observations["clean"]["exit"] == 0
         and observations["clean"]["classification"] == "no-finding"
@@ -15918,6 +16107,9 @@ def _event_adapter_control(root: Path) -> dict:
         == "coverage-unavailable"
         and all(
             item["stdout_canonical"]
+            and item["import_cli_bytes_equal"]
+            and item["cli_bytes_sha256"]
+            == item["import_bytes_sha256"]
             and item["typed_origin_strategy"] == "U"
             and item["typed_results_equal"]
             for item in observations.values()
@@ -15933,12 +16125,23 @@ def _event_adapter_control(root: Path) -> dict:
         )
         and valid["audit_exit"] == 0
         and valid["adapter_status"] == "accepted"
-        and valid["attempts"] == valid["created"]
+        and valid["attempts"] == valid["actual"] == valid["created"]
         == valid["before"] == valid["after"]
         == valid["runner_calls"] == valid["runner_created"]
         and valid["created"] > 0
         and valid["commands_match"]
         and valid["all_pids_reaped"]
+        and valid["all_runner_pids_reaped"]
+        and valid["fd_delta"] == 0
+        and valid["cache_state"] == clean_cache_state
+        and valid["observation_order"]
+        == [
+            "transaction-factory",
+            "transaction-enter",
+            "transaction-exit",
+            "audit-returned",
+            "metrics-read",
+        ]
         and valid["lifecycle"] == {
             "factory": 1,
             "enter": 1,
@@ -15947,6 +16150,48 @@ def _event_adapter_control(root: Path) -> dict:
             "exit_exception": None,
         }
         and not valid["private_modules_leaked"]
+        and blocking["audit_exit"] == 1
+        and blocking["classification"] == "blocking-finding"
+        and blocking["adapter_status"] == "accepted"
+        and blocking["attempts"] == blocking["actual"]
+        == blocking["created"] == blocking["before"]
+        == blocking["after"] == blocking["runner_calls"]
+        == blocking["runner_created"]
+        and blocking["created"] > 0
+        and blocking["commands_match"]
+        and blocking["all_pids_reaped"]
+        and blocking["all_runner_pids_reaped"]
+        and blocking["fd_delta"] == 0
+        and blocking["cache_state"] == clean_cache_state
+        and not blocking["private_modules_leaked"]
+        and blocking["lifecycle"]
+        == {
+            "factory": 1,
+            "enter": 1,
+            "exit": 1,
+            "exit_after_reap": True,
+            "exit_exception": None,
+        }
+        and blocking["observation_order"]
+        == [
+            "transaction-factory",
+            "transaction-enter",
+            "transaction-exit",
+            "audit-returned",
+            "metrics-read",
+        ]
+        and blocking["cli_import_byte_parity"]
+        == {
+            "bytes_equal": True,
+            "cli_sha256": observations["blocking"][
+                "cli_bytes_sha256"
+            ],
+            "import_sha256": observations["blocking"][
+                "import_bytes_sha256"
+            ],
+        }
+        and blocking["cli_import_byte_parity"]["cli_sha256"]
+        == blocking["cli_import_byte_parity"]["import_sha256"]
         and is_pre_execution_rejection(
             execution_seam["invalid"], "local.old is missing"
         )
@@ -16570,7 +16815,7 @@ def _run_control(name: str, root: Path):
         classification_fixture = ordinary_linear_fixture(
             root / "metrics-publication", "metrics-publication", valid=True
         )
-        classification = run_classifier(classification_fixture)
+        classification = _run_classifier(classification_fixture)
         metrics_published_after_close = bool(
             classification["metrics"]["object_process_reaps"] == 1
         )
@@ -16592,7 +16837,7 @@ def _run_control(name: str, root: Path):
 
         ObjectDatabase.__init__ = init_with_raising_close
         try:
-            recovered_close_result = run_classifier(
+            recovered_close_result = _run_classifier(
                 ordinary_linear_fixture(
                     root / "raising-close-classifier",
                     "raising-close-classifier",
@@ -16636,7 +16881,7 @@ def _run_control(name: str, root: Path):
         ObjectDatabase.__init__ = init_with_unclosable_pipe
         ObjectDatabase._raw_close_owned_fd = refuse_raw_close
         try:
-            unclosed_result = run_classifier(
+            unclosed_result = _run_classifier(
                 ordinary_linear_fixture(
                     root / "unclosed-classifier",
                     "unclosed-classifier",
@@ -17080,7 +17325,7 @@ def _run_control(name: str, root: Path):
 
         ObjectDatabase.close = close_then_report_unproved_reap
         try:
-            cleanup_failure_result = run_classifier(
+            cleanup_failure_result = _run_classifier(
                 ordinary_linear_fixture(
                     root / "cleanup-failure",
                     "cleanup-failure",
@@ -17249,8 +17494,8 @@ def _run_control(name: str, root: Path):
             with temporary_environment(
                 LANG=locale, LANGUAGE=locale, LC_ALL=locale, TZ="UTC"
             ):
-                stable[locale] = run_classifier(fixture)
-                ambient[locale] = run_classifier(
+                stable[locale] = _run_classifier(fixture)
+                ambient[locale] = _run_classifier(
                     fixture, Damage(ambient_git_diagnostics=True)
                 )
         stable_reasons = {
@@ -17291,8 +17536,8 @@ def _run_control(name: str, root: Path):
             },
         }
     fixture, damage, damaged_expected = control_builder(name, root)
-    baseline = run_classifier(fixture)
-    damaged = run_classifier(fixture, damage)
+    baseline = _run_classifier(fixture)
+    damaged = _run_classifier(fixture, damage)
     budget_observation = None
     if name == "buffered-graph-output":
         raw_bytes = fixture.details["budget_contract"]["raw_graph_bytes"]
@@ -17439,17 +17684,17 @@ def validate_scenario_aliases(results: list[dict]):
     return inventory, failures
 
 
-def run_suite(root: Path, *, reverse_construction: bool = False):
+def _run_suite(root: Path, *, reverse_construction: bool = False):
     failures = []
     results = []
-    builders = list(scenario_builders())
+    builders = list(_scenario_builders())
     if reverse_construction:
         builders.reverse()
     for index, builder in enumerate(builders, start=1):
         fixture_root = root / f"{index:02d}"
         with _fixture_repository_session(fixture_root):
             fixture = builder(fixture_root)
-        result = run_fixture(fixture)
+        result = _run_fixture(fixture)
         # Result validation uses reconciler parsing predicates but performs no
         # production audit.  Give even this fixture-only phase a fresh private
         # module rather than reopening an ambient reconciler fallback.
@@ -17810,7 +18055,7 @@ def _ordinary_audit(
     budget_limit: int | None,
 ) -> dict:
     """Private Strategy-U classifier behind the typed event boundary."""
-    fixture = Fixture(
+    fixture = _Fixture(
         "ordinary-event-audit",
         RepositoryView(session.root),
         "",
@@ -17821,7 +18066,7 @@ def _ordinary_audit(
         budget_limit=budget_limit,
         origin_strategy="U",
     )
-    result = Classifier(fixture, session=session).run()
+    result = _Classifier(fixture, session=session).run()
     result.pop("expected_result", None)
     result.pop("details", None)
     return result
@@ -18081,7 +18326,7 @@ def main(argv=None, *, git_runner: TrustedGitRunner):
     with root_context as raw_root:
         root = Path(raw_root)
         if arguments.self_test:
-            return run_suite(
+            return _run_suite(
                 root,
                 reverse_construction=arguments.reverse_construction,
             )
