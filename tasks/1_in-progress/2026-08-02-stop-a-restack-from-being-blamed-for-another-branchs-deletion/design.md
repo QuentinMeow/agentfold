@@ -307,9 +307,7 @@ production call site, GitHub adapter, staged behavior, or full suite already wor
 **Repository substitution:** pass — any adopted repository using AgentFold's queue and rewritten-history gate needs the same false-accusation protection
 **User-global writes:** none
 **Why AgentFold core:** rewritten-history queue preservation and lifecycle authority are reconciler invariants, not local configuration, a product service, private overlay, or separate plugin
-**Thin adapter:** GitHub may resolve and stabilize one exact same-repository PR base SHA,
-fetch exact event objects, and derive local `M`; it owns no identity, lifecycle, authority,
-or fallback decision
+**Thin adapter:** none
 
 ---
 
@@ -5617,3 +5615,93 @@ classifier, separate ordinary composition, canonical result/counters, logical re
 transaction, tests, and explicit trust boundary. Provider service work, trusted execution,
 activation, workflow replacement, and legacy retirement require separate tasks, designs,
 reviews, and PRs and cannot borrow this task's verdicts or POC evidence.
+
+## 2026-09-04 amendment — cap at the acceptance criteria and implement the continuity-edge repair
+
+**Amendment status:** closes this task at its six acceptance criteria. The repair lands in
+`automation/reconcile/reconcile.py` and its tests; amendments 1–35 and the dormant `ref_update`
+standalone core stay in this file as parked design history, neither required by any acceptance
+criterion nor deleted.
+
+### Whether the missing guard was deliberate (acceptance criterion 4)
+
+`git log -S'divergent update discarded a live old-tip action'` and
+`git log -S'def committed_queue_deletion_events'` each return only `91e0ad2` (2026-07-23,
+"harness: preserve queue actions across revisions", task `2026-07-23-first-class-message-queue`),
+whose body carries no rationale: the constant and its two-tree event source entered together.
+`git log --all -m -S'def candidate_paths_match_other_parent'` lists only the two-parent merge
+`d7eefcee` (2026-07-24), against both parents and no non-merge commit, so the guard entered in
+that merge's own resolution a day later and reached `main` through `2372e48` (pull request #7);
+no ADR, test, or comment excludes it from the continuity edge. Reading: the continuity edge was
+structurally deliberate as a raw preservation check with no parent set to consult, and the later
+guard's absence there is not evidenced as a deliberate exclusion. The asymmetry is repaired.
+
+### The continuity-edge repair meets the six acceptance criteria
+
+`continuity_deletion_problem(old_tip, new_head, path)` replaces the constant problem for one
+path the displaced tip `O` carries and the new head `N` lacks: (1) exactly one merge base `C`
+of `O` and `N` from `git merge-base --all`, otherwise the constant finding; (2)
+`git_tree_path_entry(O, path)` equal to `git_tree_path_entry(C, path)`, otherwise the constant
+finding, because an action the old lineage authored or changed is still the branch's to answer
+for (acceptance criterion 2); (3) every real parent→child edge in `C..N` on which the path's
+tree entry disappears, located by tree entry per parent edge from one `rev-list --parents` walk
+with no activation skip, minus an edge where `candidate_paths_match_other_parent` proves a
+merge adopted another parent's real deletion, and following an identity-preserving timing move
+to its destination; (4) `queue_deletion_problem` on each located edge, the first problem
+reported as `inherited deletion <commit> lacks its own lifecycle evidence: <problem>` with the
+fix `repair or revert the base deletion; force-pushing this branch cannot resolve it`
+(acceptance criterion 3); (5) silence only when no located edge was invalid and at least one
+validated edge deleted the action identity `C` carried (acceptance criterion 1; the task's
+reproduction is `test_continuity_edge_accepts_a_restack_over_a_valid_base_resolution`). The
+check id stays `queue-resolution` with the path as subject; a continuity verdict repeating an
+ordinary-range finding for the same path and problem is one finding. Authorship is never
+consulted; no `M`, pull-request API, provider state, or mutable `HEAD` participates; a Git
+failure raises `GitSnapshotError`. Eleven continuity tests beside the two existing
+displaced-tip tests cover the reproduction, an evidence-free base deletion, the old lineage's
+own claim, a mixed drop, a merge-shaped base, a timing move, reintroduction then bare
+re-deletion, a pre-activation base deletion, criss-cross merge bases, de-duplication, and a
+base-side identity rewrite; scratch mutations dropping the identity requirement, the lifecycle
+call, the tree-entry guard, the merge skip, or the move-follow each turn at least one of them
+red (acceptance criterion 2). `verification.md` carries the real commands and output of those
+runs and of the full suite (acceptance criterion 5) when they are folded.
+
+### The production-contract line is parked
+
+The v11–v15 production-contract prototype line is parked, not repaired. v15 at
+`7e47b5b66b579e01e82bb4cbb9e5e622580d4800` received three fresh BLOCK verdicts on 2026-09-04:
+its public audit verdict is computed under a frozen fixture clock, its evidence audit passes
+only where the first-found Git binary is byte-identical to one machine's, and its audited path
+leaves the reconciler's `HEAD` object unbound so deletion authority reads the repository's
+current `HEAD`. No repair round is opened; the resume item
+`message-queue/needs-agent/requests/future-blocking-resume-v15-production-contract-review.md`
+records the hold.
+
+### Corrected receipt lines
+
+The `Thin adapter` line of the original receipt (the `## Core fit` section above) describes
+GitHub resolving a pull-request base SHA and deriving `M`; the repair needs neither, writes
+only repository files, and calls no provider API. The receipt reads correctly as:
+
+```text
+**Agent substitution:** pass — the rule consumes only committed repository objects and existing queue authority, so another agent runtime preserves the behavior
+**Provider substitution:** not-applicable — no hosted-provider state participates in identity, authority, or attribution
+**Repository substitution:** pass — any adopted repository using AgentFold's queue and rewritten-history gate needs the same false-accusation protection
+**User-global writes:** none
+**Why AgentFold core:** rewritten-history queue preservation and lifecycle authority are reconciler invariants, not local configuration, a product service, private overlay, or separate plugin
+**Thin adapter:** none
+```
+
+### Two accepted differences from the parked classifier design
+
+Byte-identical delete-and-recreate on the old lineage, and reintroduction followed by a valid
+re-deletion, are silent under the repair where the parked classifier blocked both: the queue
+contract treats an evidenced real-edge deletion of the same action text as a resolution, and
+neither case is required by an acceptance criterion.
+
+### Follow-ups outside this task
+
+Two defects remain for separate tasks and are untouched here: `claimed_lifecycle_problem` can
+borrow a claim from any parent across a merge's absence boundary (an ordinary-path defect, not
+restack-specific), and `committed_queue_mutation_events` on the continuity edge has the same
+missing guard for the mutation group, so a base-side identity change the base's own gate
+admitted can be attributed to the rewrite.
