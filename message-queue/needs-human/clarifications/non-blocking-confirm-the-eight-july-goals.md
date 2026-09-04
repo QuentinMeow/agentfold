@@ -46,7 +46,7 @@ rejection.
 <details>
 <summary>For the record — bookkeeping the reconciler reads. Nothing here needs you.</summary>
 
-**Status:** waiting  
+**Status:** folding  
 **Filed:** 2026-09-04, by claude, from task `2026-09-04-keep-owner-words-and-goal-fit-in-every-task`  
 **Full context:** `roadmap/desired-state.md`  
 **Resolution evidence:** `roadmap/desired-state.md`  
