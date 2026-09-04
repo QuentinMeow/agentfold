@@ -649,3 +649,48 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Prepared durable run findings for the common human development cycles and
   the exact semantic-boundary migration to v15. These are design inputs, not
   repository implementation claims.
+
+## 2026-09-04 — review the handoff, cap the task, land the continuity repair (claude)
+
+- Correction to the 2026-09-02–03 entry above, appended rather than edited: after v15 froze at
+  7e47b5b66b579e01e82bb4cbb9e5e622580d4800, four serial reviewer starts across three available
+  model lineages returned backend HTTP 404 before execution — not three starts across two
+  lineages. No start produced findings, a verdict, or a vote. The same stale count stands in the
+  2026-09-03 verification section, in the committed handover
+  `history/conversations/2026-09-02-1824PDT-prove-production-contract-poc/handover.md`, and in the
+  request this session resolved; the handover is immutable and is corrected by this session's
+  conversation folder, and a live request's context prose is part of its frozen identity.
+- The owner asked for the handed-off design to be reviewed by a large agent team and revised or
+  pushed back as needed. Nine read-only reviewers ran in parallel in the orchestration run
+  (findings r37–r45). Outcome, recorded as rulings C17–C22 in that run's adjudication ledger:
+  the run had drifted from the owner's request (60 wall-clock hours, 104 commits, 35,463 lines,
+  no production change; two owner prohibitions violated); the label "Strategy A" had moved from
+  the owner's answer about task-claim publication to the classifier design; the selected
+  classifier contract left the defective code path unchanged; and v15 failed all three fresh
+  reviews on concrete defects — a frozen fixture clock on the public audit path (r40), an evidence
+  audit bound to this machine's Git binary path and hash (r39), and a `git rev-parse HEAD`
+  dependency inside the audited path (r38). The design attack (r41) and an executed reproduction
+  in a disposable repository (r45) converged on a minimal evidence-validated repair.
+- Decision (`memory/decisions/2026-09-04-cap-the-restack-task-at-its-acceptance-criteria.md`):
+  the task is capped at its six acceptance criteria; amendments 1–35, the standalone
+  `ref_update` core, the semantic composition plan, and the v11–v15 line are parked design
+  history — kept, never re-baselined, never a gate. The v15 branch, worktree, POCs, findings, and
+  the 35 verification panels remain in place.
+- Landed on the task branch: the design amendment and the corrected core-fit receipt
+  (7e60be0); `continuity_deletion_problem` with eleven `continuity` tests (8435a99, written by a
+  writer agent in a child worktree and applied here because the core-scope gate accepts core
+  changes only on the `task/` branch); the hold item's evidence re-pointed (de4552d), claimed
+  (d00b29d), and resolved with the decision record (1e9142b). The fixture-clock lesson from the
+  writer: `fixture_git` collapses two commits with the same parent, tree, and message into one
+  object, so the old-tip claim in the "old lineage changed the action" test carries its own
+  message.
+- Fresh three-lens verification panel on the diff c22475e..1e9142b: correctness approved,
+  requirements match approved, blast radius blocked on one finding — the decision record named
+  two follow-ups that were not filed — remedied by filing both as backlog tasks (b0a1c8d). The
+  correctness lens also found that no test turned red if only first parents were examined;
+  a second-parent regression test now pins it (3153f7d). Verdicts and outputs are in
+  `verification.md` under the 2026-09-04 section.
+- Not done here, filed as separate work: any-parent claim borrowing in
+  `claimed_lifecycle_problem`; the same missing guard on the continuity mutation group; the
+  owner's five disposable workflow scenarios and operations manual belong to task
+  `2026-08-03-plan-multi-worktree-safety-remediation` under the new roadmap goal G9.

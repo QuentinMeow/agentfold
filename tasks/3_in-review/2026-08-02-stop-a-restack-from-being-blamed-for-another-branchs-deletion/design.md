@@ -5705,3 +5705,15 @@ borrow a claim from any parent across a merge's absence boundary (an ordinary-pa
 restack-specific), and `committed_queue_mutation_events` on the continuity edge has the same
 missing guard for the mutation group, so a base-side identity change the base's own gate
 admitted can be attributed to the rewrite.
+
+### 2026-09-04 addendum — after the fresh panel
+
+The base design's `## Chosen` and `## Verification design` sections describe the parked
+classifier line; from this amendment on, only the continuity-edge repair above binds
+implementation. The `git log -S` sentences above hold with two qualifiers a reviewer asked for:
+the constant and `committed_queue_deletion_events` return only `91e0ad2` when the search is
+limited to `automation/reconcile/reconcile.py`, and the guard's arrival is visible only with
+`git log --all -m`, where merge `d7eefcee` is the single commit listed against both of its
+parents. The two follow-ups named above are filed as backlog tasks
+`2026-09-04-judge-inherited-queue-mutations-on-their-real-edges` and
+`2026-09-04-stop-a-merge-from-borrowing-a-claim-across-an-absence`.

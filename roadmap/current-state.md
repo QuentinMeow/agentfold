@@ -1,6 +1,6 @@
 # Current state
 
-**Last-updated:** 2026-08-31
+**Last-updated:** 2026-09-04
 
 What is true today, mapped to the desired-state lines.
 
@@ -380,3 +380,15 @@ What is true today, mapped to the desired-state lines.
   is not fetched. Lexically ambiguous R-prefixed prose uses the documented exact-spacing
   fallback. An unanswerable review keeps the same unmet obligation in a fresh unanswered
   waiting review. The upper recovery task owns the verification and regression map.
+- **Restack provenance (2026-09-04)**: `check_queue_resolution` no longer blames a restacked
+  branch for a queue deletion its new base made with evidence. Each path the displaced tip
+  carried and the new head lacks is explained from the unique merge base: the old tip's copy
+  must be unchanged since it, every real deletion edge on the new head's side is validated
+  with the existing lifecycle rules (pre-activation edges included, merge propagation skipped,
+  timing renames followed), an inherited deletion without evidence is reported by its own
+  commit, and silence needs one validated deletion of the same action identity. Eleven
+  `continuity` fixtures cover it, and the continuity mutation stream still lacks the same
+  discriminator (backlog task `2026-09-04-judge-inherited-queue-mutations-on-their-real-edges`).
+  The 35-amendment classifier design and the v11–v15 production-contract prototype line are
+  parked design history by `memory/decisions/2026-09-04-cap-the-restack-task-at-its-acceptance-criteria.md`;
+  nothing of them is production.

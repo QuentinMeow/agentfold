@@ -678,3 +678,154 @@ Fresh v15 panel: 0/3. Three serial starts terminated with backend HTTP 404
 before producing any findings or verdict. No safety warning occurred. Network,
 cold clone, merge, push, semantic composition, production implementation, and
 external review did not run in this verification session.
+
+## 2026-09-04 — Capped scope, continuity-edge repair, and fresh panel (claude)
+
+Correction to the "Fresh v15 panel" paragraph of the 2026-09-03 section above, appended rather
+than edited: four serial reviewer starts across three available model lineages terminated with
+backend HTTP 404 before producing any findings or verdict — not three starts across two lineages.
+On 2026-09-04 three fresh reviewers did inspect exact commit 7e47b5b66b579e01e82bb4cbb9e5e622580d4800
+and each blocked it on a concrete defect (run findings r38, r39, r40); the classifier line is
+parked by decision record, not repaired.
+
+Environment for every command below: the task worktree
+`.git/agents/worktrees/2026-08-31-prove-the-correct-restack-queue-201c/_integration` on branch
+`task/2026-08-02-stop-a-restack-from-being-blamed-for-another-branchs-deletion`, no private overlay,
+macOS host, Python 3.14, one process at a time.
+
+### Regression fixture red before the repair (writer worktree at c22475e, production code unchanged)
+
+```
+$ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest automation.tests.test_reconcile_queue -k continuity
+FAIL: test_continuity_edge_accepts_a_restack_over_a_valid_base_resolution (automation.tests.test_reconcile_queue.ReconcileQueueTests.test_continuity_edge_accepts_a_restack_over_a_valid_base_resolution)
+AssertionError: Lists differ: [] != [<reconcile_queue.Finding object at 0x106cb46e0>]
++ [<reconcile_queue.Finding object at 0x106cb46e0>] : ['deleted unresolved queue item: divergent update discarded a live old-tip action']
+Ran 1 test in 0.234s
+FAILED (failures=1)
+```
+
+### Focused tests after the repair (at 8435a99)
+
+```
+$ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest automation.tests.test_reconcile_queue -k continuity -k displaced -k divergent
+----------------------------------------------------------------------
+Ran 16 tests in 4.101s
+
+OK
+```
+
+### Observed red: the guard still bites (scratch copies of `automation/`, never committed; same focused command)
+
+```
+(a) silence no longer requires a same-identity resolution:
+FAIL: test_continuity_edge_keeps_finding_when_the_base_resolved_a_rewritten_action
+AssertionError: 1 != 0 : []
+(b) the real deletion edge is no longer validated:
+FAIL: test_continuity_edge_reports_an_inherited_deletion_without_evidence
+FAIL: test_continuity_edge_reports_an_invalid_redeletion_after_reintroduction
+FAIL: test_continuity_edge_validates_a_pre_activation_base_deletion
+AssertionError: 1 != 0 : []
+(c) the old-tip-equals-merge-base guard removed:
+FAIL: test_continuity_edge_keeps_finding_when_old_lineage_changed_the_action
+AssertionError: 1 != 0 : []
+ERROR ... GitSnapshotError: could not read <action> from <C>  (three tests whose action never existed at C)
+(d) the merge-propagation skip removed:
+FAIL: test_continuity_edge_accepts_a_base_resolution_merged_from_a_side_branch
+(e) identity-preserving moves no longer followed:
+FAIL: test_continuity_edge_follows_a_timing_move_before_the_base_resolution
+```
+
+Mutation (a) leaves the existing divergent-range test and the mixed-drop test green because their
+dropped action is absent at the merge base, so the old-tip guard already returns the constant
+finding; the same-identity requirement is pinned by the rewritten-identity test instead.
+
+### Commit gate on the repair commit (pre-commit hook, staged lane at its default parallelism)
+
+```
+pre-commit: core scope
+core-scope: pass (2 core path(s), task 2026-08-02-stop-a-restack-from-being-blamed-for-another-branchs-deletion; independent review manual; not invoked)
+pre-commit: reconciler
+reconcile: 0 blocking finding(s), 6 advisory (not blocking)
+pre-commit: staged-path repository tests
+test workers: 15
+test shards: 82
+PASS automation/tests/test_markdown_semantics.py
+PASS automation/tests/test_reconcile_open_actions.py
+PASS automation/tests/test_reconcile_queue.py
+tests: 3/3 files passed
+test elapsed: 41.01s
+pre-commit: OK
+```
+
+### Full repository suite, serial, at 1e9142b
+
+```
+$ PYTHONDONTWRITEBYTECODE=1 python3 automation/run_tests.py --jobs 1
+PASS automation/tests/test_check_action_projection.py
+PASS automation/tests/test_check_core_scope.py
+PASS automation/tests/test_collect_github_review_actions.py
+PASS automation/tests/test_github_action_projection_workflow.py
+PASS automation/tests/test_inspect_workspace_boundaries.py
+PASS automation/tests/test_install.py
+PASS automation/tests/test_integrate.py
+PASS automation/tests/test_markdown_semantics.py
+PASS automation/tests/test_mine_cochange.py
+PASS automation/tests/test_pull_request_schema.py
+PASS automation/tests/test_reconcile_open_actions.py
+PASS automation/tests/test_reconcile_queue.py
+PASS automation/tests/test_resolve_github_external_sources.py
+PASS automation/tests/test_run_tests.py
+PASS services/quote-api/tests/test_quote_api.py
+PASS services/quote-cli/tests/test_quote_cli.py
+tests: 16/16 files passed
+test elapsed: 235.04s
+
+$ PYTHONDONTWRITEBYTECODE=1 python3 automation/reconcile/reconcile.py --check
+reconcile: 0 blocking finding(s), 6 advisory (not blocking)
+```
+
+The six advisories are the frozen older human-question records reported by `explanation-shape`
+on every run; none was edited. Not run in this session: a cold clone of this branch (the branch
+adds no test-discovery, packaging, or gate files beyond the reconciler and its test module, and
+the pre-commit hook and the serial suite both ran on the tracked bytes); the cross-vendor
+refuter — DID NOT RUN (no read-only Codex permission granted in this session).
+
+### Fresh-context panel on the diff c22475e..1e9142b (three lenses, run 2026-09-04, findings r46–r48 in the orchestration run)
+
+- correctness / r46: `approve` — could not break the continuity deletion path on seventeen probed histories (evil merge with both parents carrying the item, absence adopted from a pre-merge-base fork, criss-cross bases, rename kinds, second-parent-only deletion edges); missing objects raise `GitSnapshotError` and exit 2; a 1,516-commit walk took 0.61 s; six of seven guard removals turn named tests red, and the seventh ("examine only the first parent") had no red test — closed by the second-parent test recorded below.
+- requirements match / r47: `approve` — AC1–AC4 and AC6 met with re-verified evidence, conditional on this verification record landing (it does here); the `git log -S` sentences in the design amendment hold with the `-- automation/reconcile/reconcile.py` and `--all -m` qualifiers.
+- blast radius / r48: `block` on one finding — the decision record named two follow-ups that were not filed; remedied by commit b0a1c8d, which files both as backlog tasks with pickup requests. Everything else held: one call site, no `--range` dependence, no retry-identity change, the merge-transition reconciler at `7e1a251...HEAD` and `c22475e...HEAD` reports 0 blocking findings.
+
+Panel result after the remedy: 2 approve, 1 block resolved by a later commit. The cross-vendor refuter: DID NOT RUN (no read-only Codex permission granted in this session).
+
+### Second-parent regression test (3153f7d): red under a first-parent-only walk, green restored
+
+```
+$ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest automation.tests.test_reconcile_queue -k judges_a_deletion_reachable_only_through_a_second_parent   # scratch copy, helper walking parents[:1]
++ [<reconcile_queue.Finding object at 0x109232660>] : ['deleted unresolved queue item: divergent update discarded a live old-tip action']
+Ran 1 test in 0.539s
+FAILED (failures=1)
+
+$ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest automation.tests.test_reconcile_queue -k judges_a_deletion_reachable_only_through_a_second_parent   # helper restored
+Ran 1 test in 0.625s
+OK
+
+$ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest automation.tests.test_reconcile_queue -k continuity -k displaced -k divergent   # at 3153f7d
+Ran 17 tests in 5.177s
+
+OK
+```
+
+### Full repository suite, serial, at the final tip 3153f7d
+
+```
+$ PYTHONDONTWRITEBYTECODE=1 python3 automation/run_tests.py --jobs 1
+tests: 16/16 files passed
+test elapsed: 234.89s
+
+$ PYTHONDONTWRITEBYTECODE=1 python3 automation/reconcile/reconcile.py --check
+reconcile: 0 blocking finding(s), 6 advisory (not blocking)
+
+$ PYTHONDONTWRITEBYTECODE=1 python3 automation/reconcile/reconcile.py --check --at-transition merge --branch task/2026-08-02-stop-a-restack-from-being-blamed-for-another-branchs-deletion --range c22475e00a01c411e2405f556fba059f5737a22a...3153f7d0607ddc392f833ce6aacd1780007f5644
+reconcile: 0 blocking finding(s), 6 advisory (not blocking)
+```
