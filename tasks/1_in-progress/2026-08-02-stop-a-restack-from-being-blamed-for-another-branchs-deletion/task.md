@@ -71,6 +71,12 @@ resolved legitimately with its own evidence — not between "noisy" and "quiet".
 - [ ] `python3 automation/run_tests.py` passes, real output in `verification.md`.
 - [ ] `design.md` carries the completed core-fit receipt from `templates/task/design.md`.
 
+## Fit
+
+**Serves:** G9 — Several coding agents develop this repository in parallel, see each other's tasks, resume after an interruption, and stop later pull requests from re-resolving the same refactor conflict
+**Today:** restacking a task branch onto a base that legitimately resolved a queue item with its own evidence yields a false blocking `queue-resolution` finding against the restacked branch.
+**Fit:** aligned — a false accusation on every ordinary restack blocks the parallel, stacked workflow G9 asks for, so repairing it is inside the goal.
+
 ## Links
 
 - The reproduction's origin: the adversarial review of pull request #65

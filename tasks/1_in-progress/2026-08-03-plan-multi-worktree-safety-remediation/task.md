@@ -33,6 +33,12 @@ and publication map; each behavior change remains in its own child task and pull
       held-out agent evaluation, independent refutation, shadow operation, canary
       promotion, and rollback, and every new check requires observed-red evidence.
 
+## Fit
+
+**Serves:** G9 — Several coding agents develop this repository in parallel, see each other's tasks, resume after an interruption, and stop later pull requests from re-resolving the same refactor conflict
+**Today:** the development cycles are designed (pull request #94), but none of the five acceptance experiments from the owner's request document has run and no operations manual exists.
+**Fit:** aligned — the task decomposes the owner's 2026-08-31 request into independently reviewable core fixes, which is the design half of G9.
+
 ## Links
 
 - Audit handover: `history/conversations/2026-08-03-0730PDT-audit-multi-worktree-safety/handover.md`
