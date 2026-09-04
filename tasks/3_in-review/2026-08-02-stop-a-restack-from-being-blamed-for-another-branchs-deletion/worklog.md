@@ -33,3 +33,8 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Fixture lesson from the writer: `fixture_git` collapses two commits with the same parent,
   tree, and message into one object, so the old-tip claim in the "old lineage changed the
   action" test carries its own message.
+- After #96 merged into `main` (4ed04f4), this pull request (#97) was retargeted from the
+  owner-words branch to `main` and that merged branch was deleted from the remote; the stack
+  note left the pull-request body. GitHub's first check runs after the retarget compared a
+  merge candidate still built on the old base with the new one and reported "merge candidate
+  does not contain this event's base"; this commit refreshes the candidate.
