@@ -50,6 +50,7 @@
 - [Retry diagnosis may change exposed prose without changing the frozen record](decisions/2026-08-30-retry-diagnosis-keeps-its-exposed-editable-prose.md) — Exposed diagnostic prose in a retry's Agent notes remains editable while hidden bytes, fields, and structural boundaries stay frozen
 - [Use the existing atomic claim lane for the first proof-of-concept task](decisions/2026-08-31-task-claim-publication.md) — The first proof-of-concept task uses AgentFold's existing narrow direct-main claim lane; substantive work stays in its pull request
 - [An owner statement becomes a confirmed goal entry without a decision item](decisions/2026-09-04-owner-statements-become-goal-entries.md) — Owner-authored goals are transcribed straight into `roadmap/desired-state.md` as confirmed; agent-proposed goals enter unconfirmed with a clarification; removing or re-prioritising a confirmed goal still needs a decision item
+- [The owner confirmed all eight July goals, three of them with changes](decisions/2026-09-04-the-owner-confirmed-the-eight-july-goals.md) — All eight goals agents wrote in July stand as owner-confirmed goals; per-skill canaries become manual and optional, and one-command adoption and the task viewer are deferred to the end of the priority order
 
 ## lessons
 - [Reconciler findings need deterministic keys](lessons/automation/deterministic-finding-keys.md) — Auto-filed retries use full check+subject identity, digest-bearing names, and refreshable machine projections that preserve actor notes

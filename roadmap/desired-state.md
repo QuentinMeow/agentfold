@@ -48,7 +48,7 @@ confirmation.)*
 ## G1 — A stranger's agent can work here on first clone
 
 **Asked:** 2026-07-22, by agent claude, from `history/conversations/2026-07-22-0014PDT-bootstrap-the-harness/handover.md`
-**Confirmed:** no — agent-proposed, clarification `message-queue/needs-human/clarifications/non-blocking-confirm-the-eight-july-goals.md`
+**Confirmed:** 2026-09-04 by owner
 
 ```text
 A stranger's agent can work here on first clone. Boot from `AGENTS.md`, pass the
@@ -57,11 +57,12 @@ reconciler, complete a task end-to-end with no human explanation.
 
 Done means an agent that has never seen this repository completes a task from a fresh
 clone with no human explanation. *(Largely true — needs outside validation.)*
+The owner confirmed this goal on 2026-09-04 in chat, in these words about G1, G2, G7, and G8 together: "这些都同意，都算是goal。"
 
 ## G2 — Every schema mechanically enforced
 
 **Asked:** 2026-07-22, by agent claude, from `history/conversations/2026-07-22-0014PDT-bootstrap-the-harness/handover.md`
-**Confirmed:** no — agent-proposed, clarification `message-queue/needs-human/clarifications/non-blocking-confirm-the-eight-july-goals.md`
+**Confirmed:** 2026-09-04 by owner
 
 ```text
 Every schema mechanically enforced. Each file format in `templates/` has a
@@ -72,38 +73,12 @@ finding.
 Done means no file format exists without a check that refuses drift from it. *(Checks
 exist for queue, tasks, memory, handover; template↔check drift detection does not exist
 yet.)*
-
-## G3 — One-command adoption
-
-**Asked:** 2026-07-22, by agent claude, from `history/conversations/2026-07-22-0014PDT-bootstrap-the-harness/handover.md`
-**Confirmed:** no — agent-proposed, clarification `message-queue/needs-human/clarifications/non-blocking-confirm-the-eight-july-goals.md`
-
-```text
-One-command adoption. An `npx`/`pipx`-style installer that drops the harness
-folders into an existing repo, asks three questions (name, mode, first service), and
-wires the hooks — the claude-code-templates playbook.
-```
-
-Done means an existing repository adopts the harness with one command and three answers.
-*(Not started.)*
-
-## G4 — Per-skill eval canaries
-
-**Asked:** 2026-07-22, by agent claude, from `history/conversations/2026-07-22-0014PDT-bootstrap-the-harness/handover.md`
-**Confirmed:** no — agent-proposed, clarification `message-queue/needs-human/clarifications/non-blocking-confirm-the-eight-july-goals.md`
-
-```text
-Per-skill eval canaries. 3–6 scripted scenarios per skill with expected
-behaviors; behavioral skill edits must pass them before merge.
-```
-
-Done means every skill ships scripted scenarios and a behavioural edit that fails one
-cannot merge. *(Not started.)*
+The owner confirmed this goal on 2026-09-04 in chat, in these words about G1, G2, G7, and G8 together: "这些都同意，都算是goal。"
 
 ## G5 — Layered public/private workspace as a packaged module
 
 **Asked:** 2026-07-24, by agent codex, from `docs/designs/layered-development-workspace.md`
-**Confirmed:** no — agent-proposed, clarification `message-queue/needs-human/clarifications/non-blocking-confirm-the-eight-july-goals.md`
+**Confirmed:** 2026-09-04 by owner
 
 ```text
 Layered public/private workspace as a packaged module. The topology and
@@ -116,24 +91,12 @@ Mounts remain optional adapters rather than the boundary.
 Done means the layered workspace design runs as repository-local tooling with observed
 evidence for each of its claims. *(Design proposed; the first read-only topology inspector
 is implemented, and later stages are specified but await coordination filing.)*
-
-## G6 — A queue/task viewer
-
-**Asked:** 2026-07-22, by agent claude, from `history/conversations/2026-07-22-0014PDT-bootstrap-the-harness/handover.md`
-**Confirmed:** no — agent-proposed, clarification `message-queue/needs-human/clarifications/non-blocking-confirm-the-eight-july-goals.md`
-
-```text
-A queue/task viewer. Read-only board rendered from the folders (the folders stay
-the source of truth).
-```
-
-Done means a read-only board renders the queue and task folders without becoming a second
-source of truth. *(Not started.)*
+The owner confirmed this goal on 2026-09-04 with a reason in his own words: "G5 需要保留的，比如看我的 ~/code/job-finder-toolkit/." The repository meant is `~/code/jobs-finder-toolkit`, a public toolkit whose real data lives in a git-ignored `private/` overlay that is its own repository, guarded by a leak word list and an export script; this goal turns that hand-kept pattern into a checked module.
 
 ## G7 — The harness survives its own design review
 
 **Asked:** 2026-07-22, by agent claude, from `history/conversations/2026-07-22-0130PDT-design-review-grill/artifacts/design-review.md`
-**Confirmed:** no — agent-proposed, clarification `message-queue/needs-human/clarifications/non-blocking-confirm-the-eight-july-goals.md`
+**Confirmed:** 2026-09-04 by owner
 
 ```text
 The harness survives its own design review. Finding severity tiers so advisory
@@ -145,11 +108,12 @@ that rejects personal or provider-specific scope.
 
 Done means every finding of the July design review is fixed or explicitly deferred. *(The
 core-admission gate is implemented; six design-review tasks remain in `tasks/0_backlog/`.)*
+The owner confirmed this goal on 2026-09-04 in chat, in these words about G1, G2, G7, and G8 together: "这些都同意，都算是goal。"
 
 ## G8 — Critical obligations survive agent forgetfulness and detector failure
 
 **Asked:** 2026-07-22, by agent codex, from `docs/designs/risk-tiered-agent-guardrails.md`
-**Confirmed:** no — agent-proposed, clarification `message-queue/needs-human/clarifications/non-blocking-confirm-the-eight-july-goals.md`
+**Confirmed:** 2026-09-04 by owner
 
 ```text
 Critical obligations survive agent forgetfulness and detector failure. A
@@ -168,3 +132,37 @@ Done means the guard design is implemented under its one configuration surface w
 assurance derived from observed evidence. *(Human-reviewed design in
 `docs/designs/risk-tiered-agent-guardrails.md`; implementation task
 `2026-07-22-universal-guard-mode-configuration` filed but not started.)*
+The owner confirmed this goal on 2026-09-04 in chat, in these words about G1, G2, G7, and G8 together: "这些都同意，都算是goal。"
+
+## G4 — Per-skill eval canaries, manual and optional
+
+**Asked:** 2026-07-22, by agent claude, from `history/conversations/2026-07-22-0014PDT-bootstrap-the-harness/handover.md`
+**Confirmed:** 2026-09-04 by owner
+
+```text
+G4改成手动/可选，不强制。
+```
+
+Originally proposed as: "Per-skill eval canaries. 3–6 scripted scenarios per skill with expected behaviors; behavioral skill edits must pass them before merge." The owner confirmed it on 2026-09-04 with one change: the scenarios are run by hand and are optional, never a merge condition. Done means every skill ships scripted scenarios an agent or a human can run when a skill's behaviour changes. *(Not started.)*
+
+## G6 — A queue/task viewer
+
+**Asked:** 2026-07-22, by agent claude, from `history/conversations/2026-07-22-0014PDT-bootstrap-the-harness/handover.md`
+**Confirmed:** 2026-09-04 by owner
+
+```text
+G6 先推迟，我希望最终有网页kanban 来看总体的任务进度。
+```
+
+Originally proposed as: "A queue/task viewer. Read-only board rendered from the folders (the folders stay the source of truth)." The owner confirmed it on 2026-09-04 and deferred it: eventually a web kanban shows overall task progress. Done means a read-only web board renders the task and queue folders without becoming a second source of truth. *(Deferred by the owner on 2026-09-04; not started.)*
+
+## G3 — One-command adoption
+
+**Asked:** 2026-07-22, by agent claude, from `history/conversations/2026-07-22-0014PDT-bootstrap-the-harness/handover.md`
+**Confirmed:** 2026-09-04 by owner
+
+```text
+G3未来是需要的，但是我感觉还没准备好，未来一定要，但是现在先不做。
+```
+
+Originally proposed as: "One-command adoption. An `npx`/`pipx`-style installer that drops the harness folders into an existing repo, asks three questions (name, mode, first service), and wires the hooks — the claude-code-templates playbook." The owner confirmed it on 2026-09-04 as a goal for later, not now. Done means an existing repository adopts the harness with one command and three answers. *(Deferred by the owner on 2026-09-04; not started.)*

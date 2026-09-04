@@ -35,3 +35,8 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Filed for the owner: one non-blocking clarification asking whether the eight July goals still
   describe where the repository should go. Recorded as ADR: owner statements transcribe straight
   into confirmed goal entries.
+- Folded the owner's 2026-09-04 chat answer on the eight July goals: all eight confirmed, G4
+  changed to manual and optional, G3 and G6 deferred to the end of the priority order, G5 kept
+  with the owner's reason. Decision record
+  `memory/decisions/2026-09-04-the-owner-confirmed-the-eight-july-goals.md`; the clarification
+  is deleted in the same commit.

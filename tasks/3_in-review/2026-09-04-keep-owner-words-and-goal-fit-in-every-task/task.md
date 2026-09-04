@@ -4,7 +4,7 @@
 **Filed:** 2026-09-04, by claude, from chat — the owner's request is quoted verbatim in `requirements.md` beside this file
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-human/clarifications/non-blocking-confirm-the-eight-july-goals.md`
+**Queue actions:** none
 
 ## Goal
 
