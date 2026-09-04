@@ -4,7 +4,7 @@
 **Filed:** 2026-09-03, by codex, from task `2026-08-02-stop-a-restack-from-being-blamed-for-another-branchs-deletion`
 **Action:** When the reviewer service accepts a normal read-only task again, run three fresh v15 reviews one at a time and resolve this item only if all three accept the same immutable commit.
 **Full context:** `docs/designs/restack-queue-provenance/pocs/production-contract/README.md`
-**Resolution evidence:** `docs/designs/restack-queue-provenance/pocs/production-contract/README.md`
+**Resolution evidence:** `memory/decisions/2026-09-04-cap-the-restack-task-at-its-acceptance-criteria.md`
 **Blocks at:** event:production-contract-poc-acceptance
 **Until then:** Continue reversible workflow planning only; do not integrate the v15 POC, repair the semantic POC, select the final Strategy A design, or start production implementation.
 
