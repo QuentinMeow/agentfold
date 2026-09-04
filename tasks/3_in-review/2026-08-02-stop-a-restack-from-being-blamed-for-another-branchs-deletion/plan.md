@@ -6,4 +6,4 @@
 - [x] 4. Record the selected discriminator and rejected alternatives in `design.md`, including the core-fit receipt.
 - [x] 5. Implement only the selected approach with observed-red regression coverage.
 - [x] 6. Run targeted, full-suite, reconciler, cold-clone, and fresh-context verification; record only captured output.
-- [ ] 7. Publish the task branch and verification evidence as one pull request.
+- [x] 7. Publish the task branch and verification evidence as one pull request.
