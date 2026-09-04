@@ -49,6 +49,7 @@
 - [A live human question hides its machine record in one sanctioned fold, checked by position](decisions/2026-08-18-the-machine-record-is-folded-and-checked-by-position.md) **[amended]** — Machine fields on new human queue items live below the answer line inside one `<details>`, and the checks that hold that shape are scoped by line position rather than by key name
 - [Retry diagnosis may change exposed prose without changing the frozen record](decisions/2026-08-30-retry-diagnosis-keeps-its-exposed-editable-prose.md) — Exposed diagnostic prose in a retry's Agent notes remains editable while hidden bytes, fields, and structural boundaries stay frozen
 - [Use the existing atomic claim lane for the first proof-of-concept task](decisions/2026-08-31-task-claim-publication.md) — The first proof-of-concept task uses AgentFold's existing narrow direct-main claim lane; substantive work stays in its pull request
+- [Cap the restack task at its acceptance criteria and park the classifier line](decisions/2026-09-04-cap-the-restack-task-at-its-acceptance-criteria.md) — The restack false-accusation task is fixed by the minimal evidence-validated continuity-edge repair; the 35-amendment classifier design and the v11–v15 production-contract POC line are parked as design history, not gates
 
 ## lessons
 - [Reconciler findings need deterministic keys](lessons/automation/deterministic-finding-keys.md) — Auto-filed retries use full check+subject identity, digest-bearing names, and refreshable machine projections that preserve actor notes
