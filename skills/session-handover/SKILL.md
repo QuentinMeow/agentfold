@@ -25,7 +25,8 @@ anything.
    lesson in `memory/lessons/<area>/` (merge into an existing lesson first —
    `memory/AGENTS.md`); then `reconcile.py --fix-index`.
 5. **Roadmap**: if reality changed, update `roadmap/current-state.md` (bump
-   `Last-updated:`).
+   `Last-updated:`); re-read the task's `## Fit` against `roadmap/desired-state.md` and
+   update it if the goal moved.
 6. **Handover file**: copy `templates/handover.md` to
    `history/conversations/<YYYY-MM-DD-HHMM><TZ>-<slug>/handover.md` (session start,
    local time + timezone abbreviation). One screen, plain
