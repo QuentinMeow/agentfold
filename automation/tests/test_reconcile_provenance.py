@@ -473,7 +473,6 @@ class ReconcileProvenanceTests(unittest.TestCase):
              ["has no requirements.md", "has no `## Fit` section"]),
             ("2_blocked", "core",
              ["has no requirements.md", "has no `## Fit` section"]),
-            ("3_in-review", "records-only", ["has no requirements.md"]),
         )
         for status, scope, expected in live:
             with self.subTest(status=status), self.repo() as root:
@@ -482,7 +481,7 @@ class ReconcileProvenanceTests(unittest.TestCase):
                           text=task_text(scope=scope, criteria=unlabelled, fit=""))
                 self.assertEqual([], self.findings("task-provenance"))
                 self.assertOnly(expected, self.findings("task-provenance-advice"))
-        for status in ("0_backlog", "4_done"):
+        for status in ("0_backlog", "3_in-review", "4_done"):
             with self.subTest(status=status), self.repo() as root:
                 self.roadmap(root)
                 self.task(root, task_id=OLD_TASK, status=status, requirements=None,
@@ -558,6 +557,21 @@ class ReconcileProvenanceTests(unittest.TestCase):
         with self.repo(today=datetime.date(2026, 9, 20)) as root:
             self.roadmap(root)
             self.assertEqual([], self.findings("roadmap-goals-advice"))
+
+    def test_the_unconfirmed_goal_clock_starts_when_the_clarification_was_filed(self):
+        recent = "# Which goal does this serve?\n\n**Filed:** 2026-10-01, by test\n"
+        old = "# Which goal does this serve?\n\n**Filed:** 2026-08-01, by test\n"
+        with self.repo(today=datetime.date(2026, 10, 15)) as root:
+            self.roadmap(root)
+            self.write(root, CLARIFICATION, recent)
+            self.assertEqual([], self.findings("roadmap-goals-advice"))
+        with self.repo(today=datetime.date(2026, 10, 15)) as root:
+            self.roadmap(root)
+            self.write(root, CLARIFICATION, old)
+            self.assertOnly(
+                ["G2 has been agent-proposed for 75 days without the owner's confirmation"],
+                self.findings("roadmap-goals-advice"),
+            )
 
     def test_a_live_task_serving_a_retired_goal_is_advisory(self):
         roadmap = roadmap_text(goal_entry("G1", G1_TITLE), RETIRED_G3)

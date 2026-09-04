@@ -194,7 +194,7 @@ FIT_SERVES_GOAL_RE = re.compile(r"^(G\d+) — (\S.*?)[ \t]*$")
 FIT_SERVES_NONE_RE = re.compile(r"^none — `([^`]+)`$")
 FIT_VALUES = ("aligned", "extends", "conflicts", "unclear")
 FIT_REQUIRED_STATUSES = ("1_in-progress", "2_blocked", "3_in-review", "4_done")
-PRE_ACTIVATION_ADVICE_STATUSES = ("1_in-progress", "2_blocked", "3_in-review")
+PRE_ACTIVATION_ADVICE_STATUSES = ("1_in-progress", "2_blocked")
 GOAL_HEADING_RE = re.compile(r"^(G\d+) — (\S.*?)[ \t]*$")
 GOAL_CONFIRMED_OWNER_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}) by owner$")
 GOAL_CONFIRMED_NO_RE = re.compile(r"^no — agent-proposed, clarification `([^`]+)`$")
@@ -11906,7 +11906,9 @@ def check_task_provenance_advice():
 
     Registered under its own id so one id maps to exactly one severity tier (see
     `check_stale_task`). A task filed before the provenance grammar is asked for
-    nothing while it is live except this reminder; done and backlog ones are exempt.
+    nothing except this reminder while it is still being worked (in progress or
+    blocked); one already in review, done, or still in backlog is exempt, because
+    nobody is editing it and its author could not have met the rule when writing.
     """
     goals = roadmap_goals()
     for task, status, task_text in provenance_task_records():
@@ -12054,6 +12056,15 @@ def check_roadmap_goals_advice():
     for goal_id, (_title, got) in goals.items():
         proposed = GOAL_CONFIRMED_NO_RE.match(got.get("Confirmed", "").strip())
         asked = parse_date(got.get("Asked", ""))
+        # The clock starts when the owner was actually asked: the clarification's
+        # filing date. A goal transcribed from an older record falls back to `Asked`.
+        if proposed:
+            clarification = REPO / proposed.group(1)
+            filed = (
+                parse_date(fields(clarification).get("Filed", ""))
+                if candidate_has_file(clarification) else None
+            )
+            asked = filed or asked
         if proposed and asked and (TODAY - asked).days > UNCONFIRMED_GOAL_DAYS:
             yield Finding(
                 "roadmap-goals-advice", rel,
