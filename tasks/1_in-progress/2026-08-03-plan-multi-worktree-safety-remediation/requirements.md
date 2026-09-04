@@ -7,7 +7,11 @@ carried provenance labels, so its criteria stay as written.
 ## 2026-08-31 — chat
 
 ```text
-use strongest agent teams to implement this, and also reason about the human workflow for collaborating with agents. Make sure you design for each common development cycle and create common usage scenario upfront, and let subagents verify they work in the end. You can work for as long as you want, even more than 10 hours are fine. Do whatever you need to unblock yourself. I'm able to answer questions for the first 6 hours. Go full auto after 6 hours. Make sure you reason about the plan and have detailed plans for verifying the results (let subagents search for harness testing and self evolved AI agents). If you find current repo has problems, fix current repo first. Do the most correct way, finishing implementation is not a hard requirement, I want to do things right instead of done. In the end, I want all progress in the form of PRs. You don't need backward compatibility, I only need the most correct final version in PRs.
+/Users/quentinmiao/Documents/Codex/2026-08-30/ba/outputs/multi-agent-git-implementation-prompt.md check this,  as well as understand the current repo structure[$agent-orchestration](/Users/quentinmiao/code/dotagents/skills/agent-orchestration/SKILL.md)  use strongest agent teams to implement this, and also reason about the human workflow for collaborating with agents. Make sure you design for each common development cycle and create common usage scenario upfront, and let subagents verify they work in the end. You can work for as long as you want, even more than 10 hours are fine. Do whatever you need to unblock yourself. I'm able to answer questions for the first 6 hours. Go full auto after 6 hours. Make sure you reason about the plan and have detailed plans for verifying the results (let subagents search for harness testing and self evolved AI agents).
+
+If you find current repo has problems, fix current repo first. Do the most correct way, finishing implementation is not a hard requirement, I want to do things right instead of done.
+
+In the end, I want all progress in the form of PRs. You don't need backward compatibility, I only need the most correct final version in PRs.
 ```
 
 ## 2026-08-30 — the owner-supplied request document

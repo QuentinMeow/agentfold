@@ -2,7 +2,7 @@
 
 **Last-updated:** 2026-09-04
 
-What is true today, mapped to the desired-state lines.
+What is true today, mapped to the desired-state goals.
 
 - **Structure**: all eleven top-level folders exist and follow their own contracts;
   `docs/designs/` holds durable proposals separately from principles and ADRs; task
@@ -126,7 +126,7 @@ What is true today, mapped to the desired-state lines.
   found the eventual-consistency-vs-blocking-gate contradiction plus honesty and
   wording gaps. Wording gaps fixed on main; a ninth principle
   (`handbook/principles/provenance-over-position.md`) added; six hardening tasks
-  filed in the backlog (desired-state line 7).
+  filed in the backlog (goal G7 in `desired-state.md`).
 - **Guardrail proposal review (2026-07-22)**: the owner approved the provenance
   principle wording and narrowed the critical-obligations proposal to template-first,
   universally mode-configurable guards (`hard`, `soft`, `off`, `manual`);
@@ -248,7 +248,7 @@ What is true today, mapped to the desired-state lines.
   classification stays attested by the same decision round.
 - **Not yet real**: one-command adoption installer, eval canaries, packaged
   layered public/private workspace, queue viewer, design-review hardening — see
-  `desired-state.md` lines 3–8.
+  `desired-state.md` goals G1–G8.
 - **Explaining the work (2026-08-02)**: `skills/explain-to-human/` states one standard for
   everything a human reads — three layers, effect before mechanism, a before and an after
   per change claim, glossed local vocabulary, one worked example, calibrated uncertainty,

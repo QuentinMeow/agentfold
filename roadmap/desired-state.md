@@ -12,8 +12,11 @@ an id is never reused, and confirmed goals are listed before agent-proposed ones
 **Confirmed:** 2026-08-31 by owner
 
 ```text
-use strongest agent teams to implement this, and also reason about the human workflow for collaborating with agents. Make sure you design for each common development cycle and create common usage scenario upfront, and let subagents verify they work in the end.
-请在我的实际开发环境中落地一套可用的工作流。多个编码 agent 要能并行开发、查询彼此任务、中断后接续，并减少后续 PR 重复解决同一次重构冲突。请完成配置与验证，不要停在概念、选型报告或架构图。
+/Users/quentinmiao/Documents/Codex/2026-08-30/ba/outputs/multi-agent-git-implementation-prompt.md check this,  as well as understand the current repo structure[$agent-orchestration](/Users/quentinmiao/code/dotagents/skills/agent-orchestration/SKILL.md)  use strongest agent teams to implement this, and also reason about the human workflow for collaborating with agents. Make sure you design for each common development cycle and create common usage scenario upfront, and let subagents verify they work in the end. You can work for as long as you want, even more than 10 hours are fine. Do whatever you need to unblock yourself. I'm able to answer questions for the first 6 hours. Go full auto after 6 hours. Make sure you reason about the plan and have detailed plans for verifying the results (let subagents search for harness testing and self evolved AI agents).
+
+If you find current repo has problems, fix current repo first. Do the most correct way, finishing implementation is not a hard requirement, I want to do things right instead of done.
+
+In the end, I want all progress in the form of PRs. You don't need backward compatibility, I only need the most correct final version in PRs.
 ```
 
 Done means the workflow is configured and verified in this repository, with a short
@@ -31,7 +34,7 @@ exists yet; the restack false-accusation defect is under repair in task
 **Confirmed:** 2026-09-04 by owner
 
 ```text
-we also need to persist the user's idea for ALL TASKS. We MUST DIFFERENTIATE USER'S REQUIREMENT and agent's self-added requirements, and we need a place to document the desired features /end goals for each repo, the full picture, so that we don't miss the goal half way due to AI generated fake goals. At the start of every non-trivial task, agent must compare the end goal, current state and how does the new requirement fits (and let human decide if there's any conflicts, anything doesn't seem intuitive, instead of hacking around and make compromise). Implement this human requirements / agent supplied requirements documentation efficiently
+here's the handoff from another agent. use highest agent teams (you can spin up 5 - 10 subagents at the same time) to review this design. You need to pick up the work and decide what design to revise, push back, and redesign as needed. Another thing I want to highlight is, we also need to persist the user's idea for ALL TASKS. We MUST DIFFERENTIATE USER'S REQUIREMENT and agent's self-added requirements, and we need a place to document the desired features /end goals for each repo, the full picture, so that we don't miss the goal half way due to AI generated fake goals. At the start of every non-trivial task, agent must compare the end goal, current state and how does the new requirement fits (and let human decide if there's any conflicts, anything doesn't seem intuitive, instead of hacking around and make compromise). Implement this human requirements / agent supplied requirements documentation efficiently (search online for any solid open source light weight implementation and learn from them), then continue working on the task showed below (make sure you find the work correctly from the worktree / branches):
 ```
 
 Done means every task folder holds the owner's words verbatim in `requirements.md`, every

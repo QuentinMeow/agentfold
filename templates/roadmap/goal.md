@@ -9,4 +9,4 @@
 
 <Two or three sentences: what done looks like, then the current status in italics. A
 retired goal keeps its heading and replaces `Confirmed:` with `**Retired:** <YYYY-MM-DD>
-— <decision path>`, so an old task's Fit line still resolves.>
+— `<decision path>``, so an old task's Fit line still resolves.>

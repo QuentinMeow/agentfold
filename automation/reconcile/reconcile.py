@@ -198,6 +198,7 @@ PRE_ACTIVATION_ADVICE_STATUSES = ("1_in-progress", "2_blocked")
 GOAL_HEADING_RE = re.compile(r"^(G\d+) — (\S.*?)[ \t]*$")
 GOAL_CONFIRMED_OWNER_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}) by owner$")
 GOAL_CONFIRMED_NO_RE = re.compile(r"^no — agent-proposed, clarification `([^`]+)`$")
+GOAL_RETIRED_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}) — `([^`]+)`$")
 CONVERSATION_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-\d{4}[A-Z]{2,5}-[a-z0-9][a-z0-9-]*$")
 # Trailing whitespace is presentation, never value: two spaces at end of line are a
 # Markdown hard break, which the sanctioned record fold puts on every field line but
@@ -11693,9 +11694,10 @@ def requirements_findings(task, rel, task_text):
     `requirements_no_words`.
     """
     requirements = task / "requirements.md"
-    # A `[user <date>]` label is resolved only against a file that has at least one
-    # dated heading, fenced or not: a missing file, or one with no entry at all, is
-    # already one finding, and the label's problem is that same missing entry.
+    # A `[user <date>]` label is resolved against a well-formed requirements.md,
+    # including one holding only the no-owner-words line: a label with no entry of
+    # its date is its own finding. A missing file, or one with neither an entry nor
+    # the no-owner-words line, is already one finding and is not reported twice.
     entry_dates = None
     if repo_artifact_bytes(requirements) is None:
         yield Finding(
@@ -11710,7 +11712,7 @@ def requirements_findings(task, rel, task_text):
         dated = [date for date, _source in entries] + [
             REQUIREMENTS_ENTRY_RE.match(heading).group(1) for heading in unfenced
         ]
-        entry_dates = set(dated) if dated else None
+        entry_dates = set(dated) if (dated or no_words) else None
         for heading in unfenced:
             yield Finding(
                 "task-provenance", rel / "requirements.md",
@@ -11774,6 +11776,30 @@ def requirements_findings(task, rel, task_text):
             )
 
 
+def fit_placeholder(value):
+    """Whether a `## Fit` value is still the template's own placeholder or empty.
+
+    The template's Serves and Fit placeholders nest angle brackets, which the general
+    placeholder pattern cannot match, so a value that still opens with `<` and closes
+    with `>` counts as unfilled.
+    """
+    value = (value or "").strip()
+    return (not value or bool(PLACEHOLDER_RE.fullmatch(value))
+            or (value.startswith("<") and value.endswith(">")))
+
+
+def fit_is_filled(fit):
+    """Whether any of the three fit lines holds a value that is not a placeholder."""
+    return any(not fit_placeholder(fit.get(key, "")) for key in ("Serves", "Today", "Fit"))
+
+
+def repo_relative_path(path):
+    """Return `REPO / path` for a plain relative path inside the repository, else None."""
+    if not path or Path(path).is_absolute() or ".." in Path(path).parts:
+        return None
+    return REPO / path
+
+
 def requirements_no_words(task):
     """Whether a task's requirements.md says there are no owner words."""
     requirements = task / "requirements.md"
@@ -11816,7 +11842,7 @@ def fit_findings(rel, fit, queue_paths, goals):
                 "list the clarification in Queue actions so the task carries its "
                 "open question",
             )
-    elif has_concrete_value(serves):
+    elif not fit_placeholder(serves):
         yield Finding(
             "task-provenance", rel / "task.md",
             "**Serves:** is neither `G<n> — <the goal's title>` nor "
@@ -11825,7 +11851,7 @@ def fit_findings(rel, fit, queue_paths, goals):
             "the clarification and name it",
         )
     value = fit_value(fit.get("Fit", ""))
-    if not has_concrete_value(fit.get("Fit", "")):
+    if fit_placeholder(fit.get("Fit", "")):
         return
     if value not in FIT_VALUES:
         yield Finding(
@@ -11877,7 +11903,7 @@ def check_task_provenance():
                 )
             elif required:
                 for key in ("Serves", "Today", "Fit"):
-                    if not has_concrete_value(fit.get(key, "")):
+                    if fit_placeholder(fit.get(key, "")):
                         yield Finding(
                             "task-provenance", rel / "task.md",
                             f"`## Fit` needs a concrete **{key}:** line",
@@ -11896,7 +11922,9 @@ def check_task_provenance():
                     "name the goal this task serves in `## Fit`, or quote the owner "
                     "words that asked for it",
                 )
-        if fit is not None:
+        # An untouched template section is not a fit: it is judged only where a fit is
+        # due, so a backlog, records-only, or pre-activation task keeps the template.
+        if fit is not None and (required or fit_is_filled(fit)):
             for finding in fit_findings(rel, fit, queue_paths, goals):
                 yield finding
 
@@ -12014,12 +12042,23 @@ def check_roadmap_goals():
             )
             continue
         if retired:
-            if parse_date(got.get("Retired", "")) is None:
+            retirement = GOAL_RETIRED_RE.match(got.get("Retired", "").strip())
+            if retirement is None:
                 yield Finding(
                     "roadmap-goals", rel,
-                    f"{goal_id} carries an undated **Retired:** line",
-                    "write `**Retired:** <YYYY-MM-DD> — <decision path>`",
+                    f"{goal_id} carries a **Retired:** line without a date and a "
+                    "backticked decision path",
+                    "write `**Retired:** <YYYY-MM-DD> — `<decision path>``",
                 )
+            else:
+                decision = repo_relative_path(retirement.group(2))
+                if decision is None or repo_artifact_bytes(decision) is None:
+                    yield Finding(
+                        "roadmap-goals", rel,
+                        f"{goal_id} names decision `{retirement.group(2)}`, which "
+                        "does not exist",
+                        "name the committed decision record that retired the goal",
+                    )
             continue
         value = got.get("Confirmed", "").strip()
         proposed = GOAL_CONFIRMED_NO_RE.match(value)
@@ -12058,8 +12097,8 @@ def check_roadmap_goals_advice():
         asked = parse_date(got.get("Asked", ""))
         # The clock starts when the owner was actually asked: the clarification's
         # filing date. A goal transcribed from an older record falls back to `Asked`.
-        if proposed:
-            clarification = REPO / proposed.group(1)
+        clarification = repo_relative_path(proposed.group(1)) if proposed else None
+        if clarification is not None:
             filed = (
                 parse_date(fields(clarification).get("Filed", ""))
                 if candidate_has_file(clarification) else None

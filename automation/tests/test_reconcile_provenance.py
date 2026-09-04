@@ -155,6 +155,7 @@ class ReconcileProvenanceTests(unittest.TestCase):
                    roadmap_text() if text is None else text)
         self.write(root, CLARIFICATION, "# Which goal does this serve?\n")
         self.write(root, DECISION, "# The goal or the request?\n")
+        self.write(root, "memory/decisions/2026-09-01-retire-g3.md", "# Retire G3\n")
         self.write(root, "docs/design.md", "# Design\n")
 
     def task(self, root, task_id=NEW_TASK, status="1_in-progress", text=None,
@@ -489,6 +490,76 @@ class ReconcileProvenanceTests(unittest.TestCase):
                 self.assertEqual([], self.findings("task-provenance"))
                 self.assertEqual([], self.findings("task-provenance-advice"))
 
+    def test_a_user_label_with_only_the_no_owner_words_line_is_refused(self):
+        with self.repo() as root:
+            self.roadmap(root)
+            self.task(root, requirements=NO_WORDS)
+            self.assertOnly(
+                ["criterion cites `[user 2026-09-10]` but requirements.md has no entry dated 2026-09-10"],
+                self.findings("task-provenance"),
+            )
+
+    def test_an_untouched_template_fit_is_judged_only_where_a_fit_is_due(self):
+        template = (
+            "## Fit\n\n"
+            "**Serves:** <G<n> — the goal's title copied exactly | none — `<needs-human clarification path>`>\n"
+            "**Today:** <the current-state fact this task changes, one sentence>\n"
+            "**Fit:** <aligned | extends | conflicts | unclear> — <one sentence on how the request meets the goal and today>\n\n"
+        )
+        for status, scope in (("0_backlog", "core"), ("1_in-progress", "records-only")):
+            with self.subTest(status=status, scope=scope), self.repo() as root:
+                self.roadmap(root)
+                self.task(root, status=status, text=task_text(scope=scope, fit=template))
+                self.assertEqual([], self.findings("task-provenance"))
+        with self.repo() as root:
+            self.roadmap(root)
+            self.task(root, text=task_text(fit=template))
+            self.assertOnly(
+                ["`## Fit` needs a concrete **Serves:** line",
+                 "`## Fit` needs a concrete **Today:** line",
+                 "`## Fit` needs a concrete **Fit:** line"],
+                self.findings("task-provenance"),
+            )
+
+    def test_an_absolute_clarification_path_is_refused_without_crashing_the_advice(self):
+        absolute = "/tmp/elsewhere/non-blocking-which-goal.md"
+        roadmap = roadmap_text(goal_entry("G1", G1_TITLE), goal_entry(
+            "G2", G2_TITLE, asked="2026-07-01, by agent test, from `docs/design.md`",
+            state=f"**Confirmed:** no — agent-proposed, clarification `{absolute}`",
+        ))
+        with self.repo(today=datetime.date(2026, 10, 15)) as root:
+            self.roadmap(root, roadmap)
+            self.assertOnly(
+                [f"G2 names clarification `{absolute}`, which is not a live item"],
+                self.findings("roadmap-goals"),
+            )
+            self.assertOnly(
+                ["G2 has been agent-proposed for 106 days without the owner's confirmation"],
+                self.findings("roadmap-goals-advice"),
+            )
+
+    def test_a_retired_goal_names_an_existing_decision(self):
+        roadmap = roadmap_text(goal_entry("G1", G1_TITLE), RETIRED_G3)
+        with self.repo() as root:
+            self.roadmap(root, roadmap)
+            self.assertEqual([], self.findings("roadmap-goals"))
+        with self.repo() as root:
+            self.roadmap(root, roadmap)
+            (root / "memory/decisions/2026-09-01-retire-g3.md").unlink()
+            self.assertOnly(
+                ["G3 names decision `memory/decisions/2026-09-01-retire-g3.md`, which does not exist"],
+                self.findings("roadmap-goals"),
+            )
+        with self.repo() as root:
+            self.roadmap(root, roadmap_text(goal_entry("G1", G1_TITLE), goal_entry(
+                "G3", G3_TITLE, asked="2026-07-01, by agent test, from `docs/design.md`",
+                state="**Retired:** 2026-09-01 — a decision without a path",
+            )))
+            self.assertOnly(
+                ["G3 carries a **Retired:** line without a date and a backticked decision path"],
+                self.findings("roadmap-goals"),
+            )
+
     # --- roadmap-goals ----------------------------------------------------------
 
     def test_a_roadmap_with_confirmed_proposed_and_retired_goals_passes(self):
@@ -522,7 +593,7 @@ class ReconcileProvenanceTests(unittest.TestCase):
              "G4 needs exactly one of **Confirmed:** and **Retired:**"),
             (goal_entry("G4", "Undated retirement",
                         state="**Retired:** someday — `memory/decisions/x.md`"),
-             "G4 carries an undated **Retired:** line"),
+             "G4 carries a **Retired:** line without a date and a backticked decision path"),
             (goal_entry("G4", "Unreadable", state="**Confirmed:** yes"),
              "G4 has an unreadable **Confirmed:** value 'yes'"),
             (goal_entry("G4", "Missing item",

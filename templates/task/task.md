@@ -33,8 +33,11 @@ so the list reads as progress. By `3_in-review` every box is ticked, or
 <Filled by the agent that starts the task, before work: required from `1_in-progress`
 for `core` and `service:` scope, optional for `records-only`. Compare the full picture
 (`roadmap/desired-state.md`), what is true today (`roadmap/current-state.md`), and this
-request. A `conflicts` or `unclear` fit files a needs-human clarification or decision,
-lists it in Queue actions, and is never worked around.>
+request. `aligned`: inside the goal as written. `extends`: consistent with the goal but not
+covered by its text, so the same commit updates the goal entry. `conflicts`: contradicts a
+confirmed goal or a current-state fact. `unclear`: two plausible readings, or a fit that does
+not feel intuitive. A `conflicts` or `unclear` fit files a needs-human clarification or
+decision, lists it in Queue actions, and is never worked around.>
 
 **Serves:** <G<n> — the goal's title copied exactly | none — `<needs-human clarification path>`>
 **Today:** <the current-state fact this task changes, one sentence>

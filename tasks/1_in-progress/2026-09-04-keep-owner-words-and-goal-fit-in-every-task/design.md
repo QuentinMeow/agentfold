@@ -71,3 +71,11 @@ on a README rule and is recorded in
 **User-global writes:** none
 **Why AgentFold core:** the schema lives in `templates/` and its check in the reconciler, the two places `templates/README.md` says a file format and its enforcement must live; it is neither local configuration, a product service, a private overlay, nor a plugin.
 **Thin adapter:** none
+
+## Sources outside the record
+
+The separate per-task `requirements.md` follows the owner's standing preference, stated on
+2026-08-28 when the orchestration skill was commissioned and kept in the main agent's memory
+as a paraphrase: original requirements are stored verbatim in a separate file agents never
+edit except to append new owner words, and derived items are labelled. A paraphrase is not
+owner words, so it lives here and not in `requirements.md`.

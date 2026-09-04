@@ -55,7 +55,7 @@ agentfold/
 │       └── retries/     #     repair work from a reconciler finding or a failed job
 ├── tasks/               # work items; the folder a task sits in IS its status
 │   ├── 0_backlog/  1_in-progress/  2_blocked/  3_in-review/  4_done/
-│   └── …/<task>/        # task.md, design.md, plan.md, worklog.md, verification.md
+│   └── …/<task>/        # task.md, requirements.md, design.md, plan.md, worklog.md, verification.md
 ├── history/             # one folder per conversation, each with a short handover.md
 ├── memory/              # long-term memory: facts/, decisions/ (ADRs), lessons/, known-issues/
 ├── roadmap/             # desired-state.md vs current-state.md — the gap is the backlog

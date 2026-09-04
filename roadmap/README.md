@@ -22,5 +22,7 @@ who is speaking (`memory/decisions/2026-09-04-owner-statements-become-goal-entri
   it; chat is never the only record of it.
 - An agent-proposed goal is added as `Confirmed: no` together with a non-blocking
   clarification asking the owner to confirm it.
+- Owner-confirmed goals precede agent-proposed ones in the priority order; among
+  confirmed goals, the owner's order stands until a decision changes it.
 - Removing or re-prioritising a confirmed goal is a one-way door: file a timing-prefixed
   decision in `message-queue/needs-human/decisions/` first.
