@@ -10,7 +10,8 @@ folders that exist.
    `services/<name>/` with an `AGENTS.md` from `templates/service/AGENTS.md`.
 2. Edit the root `AGENTS.md`: one-paragraph purpose, your repo map rows, pick a
    collaboration mode. Delete example content in `memory/` and `roadmap/`; write your
-   own `roadmap/desired-state.md` first — it seeds the backlog.
+   own `roadmap/desired-state.md` first, one entry per goal from `templates/roadmap/goal.md` —
+   it seeds the backlog.
 3. Run `python3 automation/install.py`, then `reconcile.py --check` until clean.
 4. Open the repo in your agent and give it a task; the structure does the rest.
 

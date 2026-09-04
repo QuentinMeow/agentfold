@@ -1,13 +1,15 @@
 # Current state
 
-**Last-updated:** 2026-08-31
+**Last-updated:** 2026-09-04
 
-What is true today, mapped to the desired-state lines.
+What is true today, mapped to the desired-state goals.
 
 - **Structure**: all eleven top-level folders exist and follow their own contracts;
-  `docs/designs/` holds durable proposals separately from principles and ADRs; the
-  bootstrap task (`2026-07-22-bootstrap-the-harness`, in `tasks/4_done/`) is the worked
-  example of the full lifecycle.
+  `docs/designs/` holds durable proposals separately from principles and ADRs; task
+  folders carry `requirements.md`, the owner's words verbatim, dated, and append-only
+  (required for tasks filed on or after 2026-09-04); the bootstrap task
+  (`2026-07-22-bootstrap-the-harness`, in `tasks/4_done/`) is the worked example of
+  the full lifecycle.
 - **Enforcement**: `automation/reconcile/reconcile.py` checks queue/task/memory/handover
   schemas, queue timing names/fields, task↔queue links, new handover projections, link
   targets, line budgets (AGENTS.md, SKILL.md, root README), memory expiry, and
@@ -39,7 +41,18 @@ What is true today, mapped to the desired-state lines.
   computed yet: each binds the candidate through the merge commit's own parents, whose
   object ids that commit's identifier already covers, so the binding is knowable on the
   first event. Pull requests opened after that merged are green on both.
-  No template↔check drift detection yet.
+  No template↔check drift detection yet. Four provenance checks read the owner's
+  words and each task's goal fit: `task-provenance` (blocking) requires a task filed on
+  or after 2026-09-04 to carry `requirements.md`, a `[user <date>]` or `[derived]`
+  label on every acceptance criterion, and a `## Fit` from `1_in-progress` for
+  `core`/`service:` scope, and holds any `## Fit` to a goal that exists in
+  `roadmap/desired-state.md` or to a listed clarification; `roadmap-goals` (blocking)
+  holds every goal entry to its `Asked` provenance and its `Confirmed`/`Retired` state;
+  `task-provenance-advice` and `roadmap-goals-advice` report, without failing the gate,
+  a live task filed earlier that still lacks those files, an agent-proposed goal
+  unconfirmed for more than 30 days, and a fit to a retired goal. Activation is by
+  task-id date, so no committed record is asked for bytes its author could not have
+  written.
 - **Test gate cost (2026-07-30)**: three measured changes are merged. The runner no
   longer interposes a /bin/sh script named `git` on the child path, so a Git call is
   one process instead of two; the reconciler reads blob bytes through one reusable
@@ -113,7 +126,7 @@ What is true today, mapped to the desired-state lines.
   found the eventual-consistency-vs-blocking-gate contradiction plus honesty and
   wording gaps. Wording gaps fixed on main; a ninth principle
   (`handbook/principles/provenance-over-position.md`) added; six hardening tasks
-  filed in the backlog (desired-state line 7).
+  filed in the backlog (goal G7 in `desired-state.md`).
 - **Guardrail proposal review (2026-07-22)**: the owner approved the provenance
   principle wording and narrowed the critical-obligations proposal to template-first,
   universally mode-configurable guards (`hard`, `soft`, `off`, `manual`);
@@ -235,7 +248,7 @@ What is true today, mapped to the desired-state lines.
   classification stays attested by the same decision round.
 - **Not yet real**: one-command adoption installer, eval canaries, packaged
   layered public/private workspace, queue viewer, design-review hardening — see
-  `desired-state.md` lines 3–8.
+  `desired-state.md` goals G1–G8.
 - **Explaining the work (2026-08-02)**: `skills/explain-to-human/` states one standard for
   everything a human reads — three layers, effect before mechanism, a before and an after
   per change claim, glossed local vocabulary, one worked example, calibrated uncertainty,

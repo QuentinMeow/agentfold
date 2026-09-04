@@ -30,7 +30,7 @@ everyone reads.
   `message-queue/AGENTS.md`.
 - Reserved names, exact meaning: `AGENTS.md` (agent contract of its folder),
   `README.md` (human doc of its folder), `SKILL.md` (skill entry point), `task.md`,
-  `plan.md`, `design.md`, `worklog.md`, `verification.md`, `handover.md`.
+  `requirements.md`, `plan.md`, `design.md`, `worklog.md`, `verification.md`, `handover.md`.
 - A file that is one of a kind in its folder is named for its role (`index.md`,
   `current-state.md`), never `main.md` / `notes.md` / `new.md` / `final-v2.md`.
 

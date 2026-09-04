@@ -27,7 +27,8 @@ the action bus real-time while behavioral and descriptive changes stay reviewabl
 
 - **One item, one file** — concurrent agents create files, never edit shared ones.
 - **One agent per task** — claim in one coordination commit: set `**Claimed-by:**`, move
-  backlog to in-progress, add `plan.md` and `worklog.md`, and resolve its pickup request;
+  backlog to in-progress, add `plan.md` and `worklog.md`, fill `## Fit` in `task.md` for a
+  `core` or `service:` task, and resolve its pickup request;
   if the push is rejected, another agent won, so pick another task.
 - **One worktree per agent** — parallel agents use `git worktree add ../<task-id>
   task/<task-id>`, never share a checkout.

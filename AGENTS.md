@@ -75,6 +75,9 @@ mode permits. A task file may override the mode for that task only.
   binds this judgment to the task (`templates/task/design.md`).
 - **Records are immutable**: follow `memory/AGENTS.md` for ADR amendments/reversals and
   `history/AGENTS.md` for handovers.
+- **Owner words are quoted, never paraphrased**: a task's `requirements.md` and a goal
+  entry keep them verbatim and dated; every acceptance criterion says `[user <date>]` or
+  `[derived]`; a `conflicts`/`unclear` fit is a queue item, never a workaround.
 - **Scratch discipline**: throwaway files go under git-ignored `tmp/`, never the repo root.
 - **The reconciler is the referee**: `python3 automation/reconcile/reconcile.py --check` must
   pass before any commit (the pre-commit hook runs it). Don't bypass with `--no-verify`;

@@ -6,11 +6,8 @@ status field to drift (`handbook/principles/single-source-of-truth.md`).
 
 ## Lifecycle
 
-```
-0_backlog ↔ 1_in-progress ↔ 3_in-review → 4_done
-                  ↕
-              2_blocked (only while an unresolved blocking-* agent action stops it)
-```
+`0_backlog ↔ 1_in-progress ↔ 3_in-review → 4_done`, with `1_in-progress ↕ 2_blocked` only
+while an unresolved blocking-* agent action stops the task.
 
 - Task id = folder name = `YYYY-MM-DD-<kebab-slug>` (date filed). The id never changes;
   status changes are `git mv` between status folders, committed with prefix `harness:`.
@@ -29,6 +26,8 @@ status field to drift (`handbook/principles/single-source-of-truth.md`).
   action links. Queue files own delivery/status and reciprocal task context.
 - Every unclaimed backlog task links a non-blocking `Request kind: task-pickup`;
   claiming resolves and deletes it in the claim commit.
+- Filing creates `task.md` and `requirements.md` (the owner's words, verbatim); the claim
+  commit fills `## Fit` for `core`/`service:` scope. Checks: `task-provenance`.
 - **Claim before working**: in one coordination commit, set `**Claimed-by:**`, move the task
   from backlog to in-progress, add the `plan.md` and `worklog.md` that status folder requires,
   and resolve its pickup request; push, then start. One agent per task, one branch per task
@@ -51,7 +50,8 @@ status field to drift (`handbook/principles/single-source-of-truth.md`).
 
 | File | Required | Purpose |
 |------|----------|---------|
-| `task.md` | always | what & why, acceptance criteria, mode override, claim |
+| `task.md` | always | what & why, labelled acceptance criteria, fit, mode override, claim |
+| `requirements.md` | always | the owner's words, verbatim, append-only |
 | `plan.md` | from `1_in-progress` | small verifiable steps, checked off as done |
 | `design.md` | when choices were made | options considered, chosen approach, one-way doors filed |
 | `worklog.md` | always by first session | append-only; each session adds what happened |

@@ -198,6 +198,7 @@ class StagedTestSelectionTests(unittest.TestCase):
                 (
                     "test_markdown_semantics.py",
                     "test_reconcile_open_actions.py",
+                    "test_reconcile_provenance.py",
                     "test_reconcile_queue.py",
                 ),
             ),
@@ -300,6 +301,7 @@ class StagedTestSelectionTests(unittest.TestCase):
             (
                 "test_markdown_semantics.py",
                 "test_reconcile_open_actions.py",
+                "test_reconcile_provenance.py",
                 "test_reconcile_queue.py",
                 "test_quote_cli.py",
             ),

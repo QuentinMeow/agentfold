@@ -7,7 +7,7 @@ matching reconciler check in the same commit.
 
 | Template | Creates a file in |
 |----------|-------------------|
-| `task/` (five files) | `tasks/<status>/<task-id>/` |
+| `task/` (six files) | `tasks/<status>/<task-id>/` |
 | `queue/decision.md` | `message-queue/needs-human/decisions/` |
 | `queue/clarification.md` | `message-queue/needs-human/clarifications/` |
 | `queue/review.md` | `message-queue/needs-human/reviews/` |
@@ -19,6 +19,7 @@ matching reconciler check in the same commit.
 | `memory/adr.md` | `memory/decisions/` |
 | `memory/lesson.md` | `memory/lessons/<area>/` |
 | `memory/known-issue.md` | `memory/known-issues/` |
+| `roadmap/goal.md` | `roadmap/desired-state.md` |
 | `service/AGENTS.md` | `services/<new-service>/` |
 
 Placeholders look like `<this>`; every `**Key:**` line shown is required unless marked

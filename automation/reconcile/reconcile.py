@@ -163,9 +163,42 @@ ROOT_README_BUDGET = 140
 
 STALE_QUEUE_DAYS = 30
 STALE_TASK_DAYS = 14
+# A task whose folder id is dated on or after this day was filed under the provenance
+# grammar — `templates/task/requirements.md`, labelled acceptance criteria, `## Fit` —
+# so the blocking `task-provenance` rules apply to it. An older live record receives
+# `task-provenance-advice` only: an obligation may not be placed on a committed record
+# its author could not have met
+# (`memory/decisions/2026-08-01-immutable-records-are-judged-at-their-written-grammar.md`).
+TASK_PROVENANCE_SINCE = datetime.date(2026, 9, 4)
+# How long an agent-proposed goal may sit in `roadmap/desired-state.md` without the
+# owner's confirmation before `roadmap-goals-advice` says so.
+UNCONFIRMED_GOAL_DAYS = 30
 
 TASK_ID_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*$")
 REPOSITORY_SCOPE_RE = re.compile(r"^(core|records-only|service:[a-z0-9][a-z0-9-]*)$")
+# Owner words, labels, and goal fit (`templates/task/requirements.md`,
+# `templates/task/task.md`, `templates/roadmap/goal.md`).
+ROADMAP_DESIRED_STATE = "roadmap/desired-state.md"
+CLARIFICATIONS_PREFIX = "message-queue/needs-human/clarifications/"
+DECISIONS_PREFIX = "message-queue/needs-human/decisions/"
+# The text of an entry heading after `## `: a date, an em dash, the source.
+REQUIREMENTS_ENTRY_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}) — (\S.*)$")
+# Only a backtick fence whose info string is `text`, so a copied template and a
+# hand-written entry agree on one shape; a longer fence may hold words with backticks.
+REQUIREMENTS_FENCE_OPEN_RE = re.compile(r"^ {0,3}(?P<fence>`{3,})text[ \t]*$")
+NO_OWNER_WORDS_RE = re.compile(r"^No owner words — filed by \S.* from `[^`]+`\.[ \t]*$")
+CRITERION_LINE_RE = re.compile(r"^[ \t]*[-*+][ \t]+\[(?: |x|X)\][ \t]+(\S.*?)[ \t]*$")
+CRITERION_USER_RE = re.compile(r"^\[user (\d{4}-\d{2}-\d{2})\]")
+CRITERION_DERIVED_RE = re.compile(r"^\[derived\]")
+FIT_SERVES_GOAL_RE = re.compile(r"^(G\d+) — (\S.*?)[ \t]*$")
+FIT_SERVES_NONE_RE = re.compile(r"^none — `([^`]+)`$")
+FIT_VALUES = ("aligned", "extends", "conflicts", "unclear")
+FIT_REQUIRED_STATUSES = ("1_in-progress", "2_blocked", "3_in-review", "4_done")
+PRE_ACTIVATION_ADVICE_STATUSES = ("1_in-progress", "2_blocked")
+GOAL_HEADING_RE = re.compile(r"^(G\d+) — (\S.*?)[ \t]*$")
+GOAL_CONFIRMED_OWNER_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}) by owner$")
+GOAL_CONFIRMED_NO_RE = re.compile(r"^no — agent-proposed, clarification `([^`]+)`$")
+GOAL_RETIRED_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}) — `([^`]+)`$")
 CONVERSATION_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-\d{4}[A-Z]{2,5}-[a-z0-9][a-z0-9-]*$")
 # Trailing whitespace is presentation, never value: two spaces at end of line are a
 # Markdown hard break, which the sanctioned record fold puts on every field line but
@@ -606,8 +639,12 @@ ADVISORY_CHECKS = {
     # repairs the rest, so the loss is transient rather than permanent.
     "queue-render",
     "roadmap-fresh",
+    # A goal the owner has not confirmed, or a fit copied before a goal moved, is
+    # something to put in front of the agent, never a broken invariant.
+    "roadmap-goals-advice",
     "stale-queue",
     "stale-task",
+    "task-provenance-advice",
 }
 
 
@@ -11475,6 +11512,625 @@ def check_roadmap_fresh():
                       "re-read current-state.md against reality and bump Last-updated")
 
 
+# ---------------------------------------- owner words, labelled criteria, goal fit
+
+
+def task_id_date(task_id):
+    """Return the filing date a task id carries, or None for an impossible one."""
+    try:
+        return datetime.date.fromisoformat(task_id[:10])
+    except ValueError:
+        return None
+
+
+def task_is_new(task_id):
+    """Whether a task was filed under the provenance grammar.
+
+    The date prefix of the immutable folder id decides it, on or after
+    `TASK_PROVENANCE_SINCE`; an older record is judged by the grammar it was written
+    under and only receives `task-provenance-advice`
+    (`memory/decisions/2026-08-01-immutable-records-are-judged-at-their-written-grammar.md`).
+    """
+    filed = task_id_date(task_id)
+    return filed is not None and filed >= TASK_PROVENANCE_SINCE
+
+
+def fenced_words_follow(raw_lines, start):
+    """Whether a ```text fence holding at least one non-blank line opens at `start`.
+
+    Blank lines between an entry heading and its fence are allowed; anything else in
+    between is not, because an entry holds the owner's words and nothing of the
+    agent's. The fence is read from the raw lines: `semantic_text` blanks it, which is
+    exactly why the words inside are data to every other check.
+    """
+    index = start
+    while index < len(raw_lines) and not raw_lines[index].strip():
+        index += 1
+    if index >= len(raw_lines):
+        return False
+    opening = REQUIREMENTS_FENCE_OPEN_RE.match(raw_lines[index])
+    if not opening:
+        return False
+    closing = re.compile(r"^ {0,3}`{%d,}[ \t]*$" % len(opening.group("fence")))
+    words = False
+    for line in raw_lines[index + 1:]:
+        if closing.match(line):
+            return words
+        if line.strip():
+            words = True
+    return False
+
+
+def requirements_record(text):
+    """Parse one requirements.md into its dated entries and its no-owner-words line.
+
+    Returns `(entries, unfenced, no_words, other)`: `entries` lists `(date, source)`
+    for every well-formed entry, `unfenced` lists entry headings not followed by a
+    ```text fence holding words, `no_words` counts the exact
+    `No owner words — filed by … from `…`.` line, and `other` lists level-two
+    headings that are not dated entries. Fenced content is never parsed.
+    """
+    raw_lines = [line.removesuffix("\n") for line in commonmark_lines(text)]
+    clean_lines = [
+        line.removesuffix("\n") for line in commonmark_lines(semantic_text(text))
+    ]
+    entries, unfenced, other = [], [], []
+    no_words = 0
+    for index, line in enumerate(clean_lines):
+        if NO_OWNER_WORDS_RE.match(line):
+            no_words += 1
+            continue
+        heading = SECTION_HEADING_RE.match(line)
+        if not heading:
+            continue
+        entry = REQUIREMENTS_ENTRY_RE.match(heading.group(1))
+        if not entry:
+            other.append(heading.group(1))
+        elif fenced_words_follow(raw_lines, index + 1):
+            entries.append((entry.group(1), entry.group(2)))
+        else:
+            unfenced.append(heading.group(1))
+    return entries, unfenced, no_words, other
+
+
+def task_criteria(task_text):
+    """Return the checkbox lines under `## Acceptance criteria`, boxes stripped."""
+    body = level_two_section_body(task_text, "## Acceptance criteria")
+    if body is None:
+        return []
+    criteria = []
+    for line in body.splitlines():
+        matched = CRITERION_LINE_RE.match(line)
+        if matched:
+            criteria.append(matched.group(1))
+    return criteria
+
+
+def criterion_provenance(criterion):
+    """Classify one criterion's label.
+
+    Returns `("user", date)` for `[user <date>]`, `("derived", has_reason)` for
+    `[derived]` — the reason is whatever follows a ` — ` later on the line — and
+    `(None, None)` for an unlabelled line.
+    """
+    matched = CRITERION_USER_RE.match(criterion)
+    if matched:
+        return "user", matched.group(1)
+    matched = CRITERION_DERIVED_RE.match(criterion)
+    if matched:
+        return "derived", " — " in criterion[matched.end():]
+    return None, None
+
+
+def task_fit(task_text):
+    """Return the bold-key fields of `## Fit`, or None when the section is absent.
+
+    Read from the section body, not from the whole file: `text_fields` keeps the last
+    duplicate of a key, and nothing outside the section may speak for it.
+    """
+    body = level_two_section_body(task_text, "## Fit")
+    return None if body is None else text_fields(body)
+
+
+def fit_value(value):
+    """Return the fit word before its dash, lowercased: `aligned` from `aligned — …`."""
+    return re.split(r"\s+(?:—|-)\s+", (value or "").strip(), maxsplit=1)[0].lower()
+
+
+def fit_required(scope, status):
+    """Whether `## Fit` is required: behaviour-changing scope, at or past the start."""
+    return bool(scope) and scope != "records-only" and status in FIT_REQUIRED_STATUSES
+
+
+def fit_queue_paths(task_text):
+    """Return the task's `Queue actions` paths; a malformed field is task-structure's."""
+    try:
+        return list(task_queue_action_paths_from_text(task_text))
+    except ValueError:
+        return []
+
+
+def level_two_sections(text):
+    """Return `[(heading, body)]` for every level-two section, in document order."""
+    clean = semantic_text(text)
+    matches = list(SECTION_HEADING_RE.finditer(clean))
+    sections = []
+    for index, matched in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(clean)
+        sections.append((matched.group(1), clean[matched.end():end]))
+    return sections
+
+
+def roadmap_goals():
+    """Return `{goal id: (title, fields)}` from the candidate roadmap; `{}` without one."""
+    roadmap = REPO / ROADMAP_DESIRED_STATE
+    if not candidate_has_file(roadmap):
+        return {}
+    goals = {}
+    for heading, body in level_two_sections(repo_text(roadmap)):
+        matched = GOAL_HEADING_RE.match(heading)
+        if matched and matched.group(1) not in goals:
+            goals[matched.group(1)] = (matched.group(2), text_fields(body))
+    return goals
+
+
+def provenance_task_records():
+    """Yield `(task, status, task text)` for every live task folder with a task.md."""
+    for task in sorted(live_task_directories()):
+        rel = task.relative_to(REPO)
+        if len(rel.parts) != 3 or rel.parts[1] not in TASK_STATUSES:
+            continue
+        if not TASK_ID_RE.fullmatch(task.name):
+            continue
+        if repo_artifact_bytes(task / "task.md") is None:
+            continue
+        yield task, rel.parts[1], repo_text(task / "task.md")
+
+
+def requirements_findings(task, rel, task_text):
+    """Yield the blocking findings for one new task's owner words and labels.
+
+    Whether the record says there are no owner words is read separately, by
+    `requirements_no_words`.
+    """
+    requirements = task / "requirements.md"
+    # A `[user <date>]` label is resolved against a well-formed requirements.md,
+    # including one holding only the no-owner-words line: a label with no entry of
+    # its date is its own finding. A missing file, or one with neither an entry nor
+    # the no-owner-words line, is already one finding and is not reported twice.
+    entry_dates = None
+    if repo_artifact_bytes(requirements) is None:
+        yield Finding(
+            "task-provenance", rel, "missing requirements.md",
+            "copy templates/task/requirements.md: quote the owner's words verbatim "
+            "under a dated heading, or write the single no-owner-words line",
+        )
+    else:
+        entries, unfenced, no_words, other = requirements_record(
+            repo_text(requirements)
+        )
+        dated = [date for date, _source in entries] + [
+            REQUIREMENTS_ENTRY_RE.match(heading).group(1) for heading in unfenced
+        ]
+        entry_dates = set(dated) if (dated or no_words) else None
+        for heading in unfenced:
+            yield Finding(
+                "task-provenance", rel / "requirements.md",
+                f"entry `## {heading}` is not followed by a ```text fence holding "
+                "the owner's words",
+                "put the words, exactly as written, in a ```text fence directly "
+                "under the dated heading",
+            )
+        for heading in other:
+            yield Finding(
+                "task-provenance", rel / "requirements.md",
+                f"heading `## {heading}` is not a dated owner entry",
+                "requirements.md holds owner words only, under "
+                "`## <YYYY-MM-DD> — <source>` headings each over a ```text fence; "
+                "interpretation belongs in task.md",
+            )
+        if (entries or unfenced) and no_words:
+            yield Finding(
+                "task-provenance", rel / "requirements.md",
+                "carries both dated owner entries and the no-owner-words line",
+                "keep the dated entries and delete the no-owner-words line",
+            )
+        elif not entries and not unfenced and not no_words:
+            yield Finding(
+                "task-provenance", rel / "requirements.md",
+                "holds neither a dated owner entry nor the no-owner-words line",
+                "quote the owner under `## <YYYY-MM-DD> — <source>` in a ```text "
+                "fence, or write exactly `No owner words — filed by <who> from "
+                "`<durable source path>`.`",
+            )
+        if no_words > 1:
+            yield Finding(
+                "task-provenance", rel / "requirements.md",
+                "the no-owner-words line appears more than once",
+                "keep exactly one",
+            )
+    for criterion in task_criteria(task_text):
+        kind, detail = criterion_provenance(criterion)
+        excerpt = criterion if len(criterion) <= 60 else criterion[:57] + "..."
+        if kind is None:
+            yield Finding(
+                "task-provenance", rel / "task.md",
+                f"acceptance criterion lacks a provenance label: {excerpt}",
+                "open every criterion with `[user <YYYY-MM-DD>]`, the requirements.md "
+                "entry it traces to, or `[derived]` with its reason after ` — `",
+            )
+        elif kind == "user" and entry_dates is not None \
+                and detail not in entry_dates:
+            yield Finding(
+                "task-provenance", rel / "task.md",
+                f"criterion cites `[user {detail}]` but requirements.md has no "
+                f"entry dated {detail}",
+                "append the owner's words of that date to requirements.md, or label "
+                "the criterion `[derived]` with a reason",
+            )
+        elif kind == "derived" and not detail:
+            yield Finding(
+                "task-provenance", rel / "task.md",
+                f"`[derived]` criterion gives no reason: {excerpt}",
+                "end the line with ` — <why the owner's words need this>`",
+            )
+
+
+def fit_placeholder(value):
+    """Whether a `## Fit` value is still the template's own placeholder or empty.
+
+    The template's Serves and Fit placeholders nest angle brackets, which the general
+    placeholder pattern cannot match, so a value that still opens with `<` and closes
+    with `>` counts as unfilled.
+    """
+    value = (value or "").strip()
+    return (not value or bool(PLACEHOLDER_RE.fullmatch(value))
+            or (value.startswith("<") and value.endswith(">")))
+
+
+def fit_is_filled(fit):
+    """Whether any of the three fit lines holds a value that is not a placeholder."""
+    return any(not fit_placeholder(fit.get(key, "")) for key in ("Serves", "Today", "Fit"))
+
+
+def repo_relative_path(path):
+    """Return `REPO / path` for a plain relative path inside the repository, else None."""
+    if not path or Path(path).is_absolute() or ".." in Path(path).parts:
+        return None
+    return REPO / path
+
+
+def requirements_no_words(task):
+    """Whether a task's requirements.md says there are no owner words."""
+    requirements = task / "requirements.md"
+    if repo_artifact_bytes(requirements) is None:
+        return False
+    return requirements_record(repo_text(requirements))[2] > 0
+
+
+def fit_findings(rel, fit, queue_paths, goals):
+    """Yield the blocking findings for one `## Fit` section, in any task."""
+    serves = fit.get("Serves", "").strip()
+    goal_match = FIT_SERVES_GOAL_RE.match(serves)
+    none_match = FIT_SERVES_NONE_RE.match(serves)
+    if goal_match:
+        goal_id = goal_match.group(1)
+        if goal_id not in goals:
+            yield Finding(
+                "task-provenance", rel / "task.md",
+                f"**Serves:** names {goal_id}, which is not a `## {goal_id} — ` "
+                f"heading in {ROADMAP_DESIRED_STATE}",
+                "name a goal that exists, add the goal from "
+                "templates/roadmap/goal.md, or write `none — `<clarification path>``",
+            )
+    elif none_match:
+        path = none_match.group(1)
+        if not path.startswith(CLARIFICATIONS_PREFIX) \
+                or repo_artifact_bytes(REPO / path) is None:
+            yield Finding(
+                "task-provenance", rel / "task.md",
+                f"**Serves:** none names `{path}`, which is not a live item under "
+                f"{CLARIFICATIONS_PREFIX}",
+                "file the clarification from templates/queue/clarification.md, "
+                "asking which goal this task serves, and name its path",
+            )
+        elif path not in queue_paths:
+            yield Finding(
+                "task-provenance", rel / "task.md",
+                f"**Serves:** none names `{path}`, which **Queue actions:** does "
+                "not list",
+                "list the clarification in Queue actions so the task carries its "
+                "open question",
+            )
+    elif not fit_placeholder(serves):
+        yield Finding(
+            "task-provenance", rel / "task.md",
+            "**Serves:** is neither `G<n> — <the goal's title>` nor "
+            "`none — `<clarification path>``",
+            f"copy the goal's heading text from {ROADMAP_DESIRED_STATE}, or file "
+            "the clarification and name it",
+        )
+    value = fit_value(fit.get("Fit", ""))
+    if fit_placeholder(fit.get("Fit", "")):
+        return
+    if value not in FIT_VALUES:
+        yield Finding(
+            "task-provenance", rel / "task.md",
+            f"**Fit:** {fit.get('Fit', '').strip()!r} does not open with aligned, "
+            "extends, conflicts, or unclear",
+            "write `**Fit:** <aligned | extends | conflicts | unclear> — <one "
+            "sentence>`",
+        )
+    elif value in ("conflicts", "unclear") and not any(
+        path.startswith((CLARIFICATIONS_PREFIX, DECISIONS_PREFIX))
+        for path in queue_paths
+    ):
+        yield Finding(
+            "task-provenance", rel / "task.md",
+            f"**Fit:** {value} without a needs-human clarification or decision in "
+            "**Queue actions:**",
+            "file the item from templates/queue/ that puts the conflict in front of "
+            "the owner and list it; a conflict is decided by the owner, never worked "
+            "around",
+        )
+
+
+def check_task_provenance():
+    """Blocking: a new task keeps the owner's words, labels its criteria, states a fit.
+
+    New means filed on or after `TASK_PROVENANCE_SINCE`; an older record only receives
+    `task-provenance-advice`. A `## Fit` section, in any task, must name a goal that
+    exists or a listed clarification, and a `conflicts`/`unclear` fit must name the
+    queue item that puts the conflict in front of the owner.
+    """
+    goals = roadmap_goals()
+    for task, status, task_text in provenance_task_records():
+        rel = task.relative_to(REPO)
+        scope = fields(task / "task.md").get("Repository scope", "").strip()
+        fit = task_fit(task_text)
+        queue_paths = fit_queue_paths(task_text)
+        required = fit_required(scope, status)
+        if task_is_new(task.name):
+            for finding in requirements_findings(task, rel, task_text):
+                yield finding
+            if required and fit is None:
+                yield Finding(
+                    "task-provenance", rel / "task.md",
+                    "missing `## Fit` section",
+                    "copy `## Fit` from templates/task/task.md in the claim commit: "
+                    "the goal served, the current-state fact this task changes, and "
+                    "how the request fits",
+                )
+            elif required:
+                for key in ("Serves", "Today", "Fit"):
+                    if fit_placeholder(fit.get(key, "")):
+                        yield Finding(
+                            "task-provenance", rel / "task.md",
+                            f"`## Fit` needs a concrete **{key}:** line",
+                            "copy the line from templates/task/task.md and fill it",
+                        )
+            serves_none = fit is not None and bool(
+                FIT_SERVES_NONE_RE.match(fit.get("Serves", "").strip())
+            )
+            if requirements_no_words(task) and (
+                (required and fit is None) or serves_none
+            ):
+                yield Finding(
+                    "task-provenance", rel / "task.md",
+                    "neither owner words nor a goal: requirements.md says there are "
+                    "no owner words and the fit names no goal",
+                    "name the goal this task serves in `## Fit`, or quote the owner "
+                    "words that asked for it",
+                )
+        # An untouched template section is not a fit: it is judged only where a fit is
+        # due, so a backlog, records-only, or pre-activation task keeps the template.
+        if fit is not None and (required or fit_is_filled(fit)):
+            for finding in fit_findings(rel, fit, queue_paths, goals):
+                yield finding
+
+
+def check_task_provenance_advice():
+    """Advisory: provenance signals an agent should see that cannot refuse a commit.
+
+    Registered under its own id so one id maps to exactly one severity tier (see
+    `check_stale_task`). A task filed before the provenance grammar is asked for
+    nothing except this reminder while it is still being worked (in progress or
+    blocked); one already in review, done, or still in backlog is exempt, because
+    nobody is editing it and its author could not have met the rule when writing.
+    """
+    goals = roadmap_goals()
+    for task, status, task_text in provenance_task_records():
+        rel = task.relative_to(REPO)
+        scope = fields(task / "task.md").get("Repository scope", "").strip()
+        fit = task_fit(task_text)
+        if not task_is_new(task.name) and status in PRE_ACTIVATION_ADVICE_STATUSES:
+            if repo_artifact_bytes(task / "requirements.md") is None:
+                yield Finding(
+                    "task-provenance-advice", rel,
+                    "filed before the provenance grammar and has no requirements.md",
+                    "when next touched, copy templates/task/requirements.md and quote "
+                    "the owner's words from the source `Filed:` names, or write the "
+                    "no-owner-words line",
+                )
+            if fit is None and fit_required(scope, status):
+                yield Finding(
+                    "task-provenance-advice", rel / "task.md",
+                    "filed before the provenance grammar and has no `## Fit` section",
+                    "when next touched, copy `## Fit` from templates/task/task.md and "
+                    "name the goal this task serves",
+                )
+        if fit is None:
+            continue
+        goal_match = FIT_SERVES_GOAL_RE.match(fit.get("Serves", "").strip())
+        if not goal_match:
+            continue
+        goal_id, copied_title = goal_match.groups()
+        criteria = task_criteria(task_text)
+        if criteria and all(
+            criterion_provenance(criterion)[0] == "derived" for criterion in criteria
+        ):
+            yield Finding(
+                "task-provenance-advice", rel / "task.md",
+                f"every acceptance criterion is `[derived]` while the task serves "
+                f"{goal_id}",
+                "trace at least one criterion to the owner's words in requirements.md, "
+                "or ask the owner to confirm the derived criteria in a non-blocking "
+                "clarification",
+            )
+        goal = goals.get(goal_id)
+        if goal is None:
+            continue  # `task-provenance` owns a goal that does not exist
+        title, goal_fields = goal
+        if copied_title.strip() != title.strip():
+            yield Finding(
+                "task-provenance-advice", rel / "task.md",
+                f"**Serves:** copies a title that differs from the current "
+                f"`## {goal_id} — {title}`",
+                "re-read the goal and update the copy, or the fit if the goal moved",
+            )
+        if GOAL_CONFIRMED_NO_RE.match(goal_fields.get("Confirmed", "").strip()):
+            yield Finding(
+                "task-provenance-advice", rel / "task.md",
+                f"{goal_id} is agent-proposed and not yet confirmed by the owner",
+                f"re-surface the clarification named on {goal_id} in "
+                f"{ROADMAP_DESIRED_STATE}, or point the fit at a confirmed goal",
+            )
+
+
+def check_roadmap_goals():
+    """Blocking: every entry of the full picture says who asked and whether the owner agreed."""
+    roadmap = REPO / ROADMAP_DESIRED_STATE
+    if not candidate_has_file(roadmap):
+        return
+    rel = Path(ROADMAP_DESIRED_STATE)
+    seen = set()
+    for heading, body in level_two_sections(repo_text(roadmap)):
+        matched = GOAL_HEADING_RE.match(heading)
+        if not matched:
+            yield Finding(
+                "roadmap-goals", rel,
+                f"heading `## {heading}` is not a goal entry",
+                "write every level-two heading as `## G<n> — <title>`; copy "
+                "templates/roadmap/goal.md",
+            )
+            continue
+        goal_id = matched.group(1)
+        if goal_id in seen:
+            yield Finding(
+                "roadmap-goals", rel,
+                f"goal id {goal_id} appears more than once",
+                "ids are never reused; give the newer entry the next unused number",
+            )
+        seen.add(goal_id)
+        got = text_fields(body)
+        if parse_date(got.get("Asked", "")) is None:
+            yield Finding(
+                "roadmap-goals", rel,
+                f"{goal_id} lacks a dated **Asked:** line",
+                "write `**Asked:** <YYYY-MM-DD>, by <the owner | agent <who>>, from "
+                "<chat | answer to `<queue path>` | `<design or handover path>`>`",
+            )
+        confirmed = "Confirmed" in got
+        retired = "Retired" in got
+        if confirmed == retired:
+            yield Finding(
+                "roadmap-goals", rel,
+                f"{goal_id} needs exactly one of **Confirmed:** and **Retired:**",
+                "a live goal carries `**Confirmed:** <YYYY-MM-DD> by owner` or "
+                "`no — agent-proposed, clarification `<path>``; a retired one "
+                "replaces it with `**Retired:** <YYYY-MM-DD> — <decision path>`",
+            )
+            continue
+        if retired:
+            retirement = GOAL_RETIRED_RE.match(got.get("Retired", "").strip())
+            if retirement is None:
+                yield Finding(
+                    "roadmap-goals", rel,
+                    f"{goal_id} carries a **Retired:** line without a date and a "
+                    "backticked decision path",
+                    "write `**Retired:** <YYYY-MM-DD> — `<decision path>``",
+                )
+            else:
+                decision = repo_relative_path(retirement.group(2))
+                if decision is None or repo_artifact_bytes(decision) is None:
+                    yield Finding(
+                        "roadmap-goals", rel,
+                        f"{goal_id} names decision `{retirement.group(2)}`, which "
+                        "does not exist",
+                        "name the committed decision record that retired the goal",
+                    )
+            continue
+        value = got.get("Confirmed", "").strip()
+        proposed = GOAL_CONFIRMED_NO_RE.match(value)
+        if GOAL_CONFIRMED_OWNER_RE.match(value):
+            continue
+        if not proposed:
+            yield Finding(
+                "roadmap-goals", rel,
+                f"{goal_id} has an unreadable **Confirmed:** value {value!r}",
+                "write `<YYYY-MM-DD> by owner` when the owner stated the goal, or "
+                "`no — agent-proposed, clarification `<needs-human path>``",
+            )
+            continue
+        path = proposed.group(1)
+        if not path.startswith(CLARIFICATIONS_PREFIX) \
+                or repo_artifact_bytes(REPO / path) is None:
+            yield Finding(
+                "roadmap-goals", rel,
+                f"{goal_id} names clarification `{path}`, which is not a live item "
+                f"under {CLARIFICATIONS_PREFIX}",
+                "file the clarification asking the owner to confirm the goal, from "
+                "templates/queue/clarification.md, and name its path",
+            )
+
+
+def check_roadmap_goals_advice():
+    """Advisory: a goal the owner has not confirmed for long, or a fit to a retired goal.
+
+    Registered under its own id so one id maps to exactly one severity tier (see
+    `check_stale_task`).
+    """
+    goals = roadmap_goals()
+    rel = Path(ROADMAP_DESIRED_STATE)
+    for goal_id, (_title, got) in goals.items():
+        proposed = GOAL_CONFIRMED_NO_RE.match(got.get("Confirmed", "").strip())
+        asked = parse_date(got.get("Asked", ""))
+        # The clock starts when the owner was actually asked: the clarification's
+        # filing date. A goal transcribed from an older record falls back to `Asked`.
+        clarification = repo_relative_path(proposed.group(1)) if proposed else None
+        if clarification is not None:
+            filed = (
+                parse_date(fields(clarification).get("Filed", ""))
+                if candidate_has_file(clarification) else None
+            )
+            asked = filed or asked
+        if proposed and asked and (TODAY - asked).days > UNCONFIRMED_GOAL_DAYS:
+            yield Finding(
+                "roadmap-goals-advice", rel,
+                f"{goal_id} has been agent-proposed for {(TODAY - asked).days} days "
+                "without the owner's confirmation",
+                f"re-surface `{proposed.group(1)}` to the owner, or retire the goal "
+                "through a decision",
+            )
+    retired = {goal_id for goal_id, (_title, got) in goals.items() if "Retired" in got}
+    if not retired:
+        return
+    for task, status, task_text in provenance_task_records():
+        if status == "4_done":
+            continue
+        fit = task_fit(task_text)
+        if fit is None:
+            continue
+        goal_match = FIT_SERVES_GOAL_RE.match(fit.get("Serves", "").strip())
+        if goal_match and goal_match.group(1) in retired:
+            yield Finding(
+                "roadmap-goals-advice", task.relative_to(REPO) / "task.md",
+                f"**Serves:** names {goal_match.group(1)}, which is retired",
+                "point the fit at the goal that replaced it, or file a clarification "
+                "asking which goal this task serves",
+            )
+
+
 # Check id -> the function that emits findings carrying that id. Retry clearance
 # (`generated_retry_clear`), deletion certification (`queue_deletion_problem`), and
 # retry garbage collection all look an id up here, so an emitted id that is missing
@@ -11514,6 +12170,10 @@ CHECKS = {
     "agents-budget": check_agents_budget,
     "mode-valid": check_mode_valid,
     "roadmap-fresh": check_roadmap_fresh,
+    "roadmap-goals": check_roadmap_goals,
+    "roadmap-goals-advice": check_roadmap_goals_advice,
+    "task-provenance": check_task_provenance,
+    "task-provenance-advice": check_task_provenance_advice,
 }
 
 
