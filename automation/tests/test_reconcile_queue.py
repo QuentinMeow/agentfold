@@ -7585,6 +7585,497 @@ class ReconcileQueueTests(unittest.TestCase):
                 RECONCILE.stop_git_snapshot_cache()
             self.assertEqual([], findings)
 
+    # ------------------------------------------------------------------
+    # Continuity-edge fixtures. A branch forked at `C` is restacked onto a
+    # base that moved on after `C`: `O` is the displaced tip, `M` the new
+    # base, `N` the new head, and the branch's own work is one unrelated
+    # file replayed on `M`. `K` is a status-only claim edge and `D` a deletion
+    # that writes the item's declared resolution evidence in the same commit.
+    CONTINUITY_ACTION_PATH = (
+        "message-queue/needs-agent/requests/non-blocking-probe-result.md"
+    )
+    CONTINUITY_EVIDENCE_PATH = "docs/probe-evidence.md"
+
+    @staticmethod
+    def continuity_action(action="record the probe result"):
+        return (
+            "# Record the probe result\n\n"
+            "**Status:** open\n"
+            "**Filed:** 2026-07-23\n"
+            f"**Action:** {action}\n"
+            "**Full context:** `README.md`\n"
+            "**Resolution evidence:** `docs/probe-evidence.md`\n"
+            "**If unanswered:** keep the action live\n"
+        )
+
+    def continuity_root(self, root, path=None, activate=True):
+        """Commit `C`: common history carrying one live action at `path`."""
+        self.init_git(root)
+        if activate:
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+        self.write(root, "README.md", "# Common\n")
+        self.write(
+            root, path or self.CONTINUITY_ACTION_PATH, self.continuity_action()
+        )
+        self.git(root, "add", ".")
+        self.git(root, "commit", "-m", "common history with a live action")
+        return self.git(root, "rev-parse", "HEAD")
+
+    def continuity_commit_file(self, root, name, message=None):
+        """Commit one file outside the queue: branch work or base movement."""
+        self.write(root, name, f"# {name}\n")
+        self.git(root, "add", ".")
+        self.git(root, "commit", "-m", message or f"add {name}")
+        return self.git(root, "rev-parse", "HEAD")
+
+    def continuity_claim(self, root, path, message="claim the action"):
+        """Commit `K`: the status-only open -> in-repair claim edge.
+
+        The fixture clock is deterministic, so two claims of the same parent
+        with the same message would be one commit object; a claim made on a
+        second lineage passes its own `message` to stay a distinct commit.
+        """
+        item = root / path
+        item.write_text(
+            item.read_text(encoding="utf-8").replace(
+                "**Status:** open", "**Status:** in-repair"
+            ),
+            encoding="utf-8",
+        )
+        self.git(root, "add", ".")
+        self.git(root, "commit", "-m", message)
+        return self.git(root, "rev-parse", "HEAD")
+
+    def continuity_delete(self, root, path, evidence=None):
+        """Commit the deletion edge: `D` with `evidence` written, `D!` without."""
+        (root / path).unlink()
+        if evidence:
+            self.write(
+                root, evidence, "# Evidence\n\nThe probe result was recorded.\n"
+            )
+        self.git(root, "add", "-A")
+        self.git(root, "commit", "-m", "delete the action")
+        return self.git(root, "rev-parse", "HEAD")
+
+    def continuity_resolve(self, root, path):
+        """Commit `K` then `D`: the lifecycle the queue contract requires."""
+        self.continuity_claim(root, path)
+        return self.continuity_delete(root, path, self.CONTINUITY_EVIDENCE_PATH)
+
+    def continuity_findings(self, old_tip, new_head, base=None):
+        """Run queue-resolution for the push replacing `old_tip` by `new_head`."""
+        RECONCILE.start_git_snapshot_cache()
+        try:
+            with mock.patch.multiple(
+                RECONCILE,
+                CHANGE_RANGE=f"{base or old_tip}...{new_head}",
+                DISPLACED_TIP=old_tip,
+            ):
+                return list(RECONCILE.check_queue_resolution())
+        finally:
+            RECONCILE.stop_git_snapshot_cache()
+
+    def test_continuity_edge_accepts_a_restack_over_a_valid_base_resolution(
+        self,
+    ):
+        """The task's reproduction: the branch never touched the queue.
+
+        `C` carries the action; the base claims it and deletes it with its
+        evidence; the branch's only commit adds `PROBE.md` and is replayed
+        on the new base. The pull-request range `M...N` sees no deletion, so
+        only the continuity edge `O -> N` can accuse the branch.
+        """
+        with self.repo() as root:
+            path = self.CONTINUITY_ACTION_PATH
+            common = self.continuity_root(root, path)
+            self.git(root, "checkout", "-b", "old-tip")
+            old_tip = self.continuity_commit_file(root, "PROBE.md")
+
+            self.git(root, "checkout", "-b", "base", common)
+            new_base = self.continuity_resolve(root, path)
+            own_range = self.continuity_findings(None, new_base, common)
+            self.assertEqual([], own_range, self.messages(own_range))
+
+            self.git(root, "checkout", "-b", "rewritten", new_base)
+            new_head = self.continuity_commit_file(root, "PROBE.md")
+
+            findings = self.continuity_findings(old_tip, new_head, new_base)
+            self.assertEqual([], findings, self.messages(findings))
+
+    def test_continuity_edge_reports_an_inherited_deletion_without_evidence(
+        self,
+    ):
+        """A base deletion that skipped the lifecycle is still reported.
+
+        The pull-request range `M...N` cannot see the base's own edge, so the
+        continuity path is what stops a bad deletion laundering itself
+        through a restack. The finding names the base commit and its own
+        lifecycle problem, and its fix says a force-push cannot repair it.
+        """
+        with self.repo() as root:
+            path = self.CONTINUITY_ACTION_PATH
+            common = self.continuity_root(root, path)
+            self.git(root, "checkout", "-b", "old-tip")
+            old_tip = self.continuity_commit_file(root, "PROBE.md")
+
+            self.git(root, "checkout", "-b", "base", common)
+            bad_base = self.continuity_delete(root, path)
+            own_range = self.continuity_findings(None, bad_base, common)
+            self.assertEqual(1, len(own_range), self.messages(own_range))
+            self.assertIn(
+                "agent action was not committed as in-repair before deletion",
+                own_range[0].message,
+            )
+
+            self.git(root, "checkout", "-b", "rewritten", bad_base)
+            new_head = self.continuity_commit_file(root, "PROBE.md")
+
+            findings = self.continuity_findings(old_tip, new_head, bad_base)
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertEqual(Path(path), findings[0].subject)
+            self.assertIn(f"inherited deletion {bad_base}", findings[0].message)
+            self.assertIn(
+                "agent action was not committed as in-repair before deletion",
+                findings[0].message,
+            )
+            self.assertIn(
+                "force-pushing this branch cannot resolve it", findings[0].fix
+            )
+
+    def test_continuity_edge_keeps_finding_when_old_lineage_changed_the_action(
+        self,
+    ):
+        """An action the old tip claimed is not the copy the base resolved."""
+        with self.repo() as root:
+            path = self.CONTINUITY_ACTION_PATH
+            common = self.continuity_root(root, path)
+            self.git(root, "checkout", "-b", "old-tip")
+            self.continuity_claim(root, path, "claim the action on the old tip")
+            old_tip = self.continuity_commit_file(root, "PROBE.md")
+
+            self.git(root, "checkout", "-b", "base", common)
+            new_base = self.continuity_resolve(root, path)
+
+            self.git(root, "checkout", "-b", "rewritten", new_base)
+            new_head = self.continuity_commit_file(root, "PROBE.md")
+
+            findings = self.continuity_findings(old_tip, new_head, new_base)
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertEqual(Path(path), findings[0].subject)
+            self.assertIn(
+                "divergent update discarded", findings[0].message
+            )
+
+    def test_continuity_edge_reports_only_the_action_the_rewrite_dropped(
+        self,
+    ):
+        """Mixed: the base resolved one action; the rewrite dropped another."""
+        with self.repo() as root:
+            path = self.CONTINUITY_ACTION_PATH
+            dropped = (
+                "message-queue/needs-agent/requests/"
+                "non-blocking-second-probe.md"
+            )
+            common = self.continuity_root(root, path)
+            self.git(root, "checkout", "-b", "old-tip")
+            self.write(
+                root,
+                dropped,
+                self.continuity_action("record the second probe result"),
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file a second action")
+            old_tip = self.continuity_commit_file(root, "PROBE.md")
+
+            self.git(root, "checkout", "-b", "base", common)
+            new_base = self.continuity_resolve(root, path)
+
+            self.git(root, "checkout", "-b", "rewritten", new_base)
+            new_head = self.continuity_commit_file(root, "PROBE.md")
+
+            findings = self.continuity_findings(old_tip, new_head, new_base)
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertEqual(Path(dropped), findings[0].subject)
+            self.assertIn(
+                "divergent update discarded", findings[0].message
+            )
+
+    def test_continuity_edge_accepts_a_base_resolution_merged_from_a_side_branch(
+        self,
+    ):
+        """A merge that adopts a side branch's real deletion is not a deletion."""
+        with self.repo() as root:
+            path = self.CONTINUITY_ACTION_PATH
+            common = self.continuity_root(root, path)
+            self.git(root, "checkout", "-b", "old-tip")
+            old_tip = self.continuity_commit_file(root, "PROBE.md")
+
+            self.git(root, "checkout", "-b", "side", common)
+            self.continuity_resolve(root, path)
+
+            self.git(root, "checkout", "-b", "base", common)
+            self.continuity_commit_file(root, "base.md")
+            self.git(root, "merge", "--no-ff", "--no-commit", "side")
+            self.git(root, "commit", "-m", "merge the side resolution")
+            new_base = self.git(root, "rev-parse", "HEAD")
+            self.assertEqual(
+                3,
+                len(self.git(root, "rev-list", "--parents", "-n", "1", new_base).split()),
+                "the fixture base must be a two-parent merge",
+            )
+
+            self.git(root, "checkout", "-b", "rewritten", new_base)
+            new_head = self.continuity_commit_file(root, "PROBE.md")
+
+            findings = self.continuity_findings(old_tip, new_head, new_base)
+            self.assertEqual([], findings, self.messages(findings))
+
+    def test_continuity_edge_judges_a_deletion_reachable_only_through_a_second_parent(
+        self,
+    ):
+        """A valid deletion a merge makes against its second parent resolves.
+
+        A long-lived branch forked before the action was filed, so nothing on
+        its side ever carried the action; the side branch claimed it. The base
+        merged the claim branch into the long-lived branch and finished the
+        lifecycle in the merge commit itself: `M` deletes the action and
+        writes its evidence. The only real edge on which the action's tree
+        entry disappears is `K -> M`, and `K` is `M`'s *second* parent; the
+        first parent cannot supply the absence, because its merge base with
+        `K` predates the action. A helper that examined only first parents
+        would locate no deletion edge and keep the constant finding.
+        """
+        with self.repo() as root:
+            path = self.CONTINUITY_ACTION_PATH
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            self.write(root, "README.md", "# Common\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "history before the action was filed")
+            before_action = self.git(root, "rev-parse", "HEAD")
+            self.write(root, path, self.continuity_action())
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file the action")
+            common = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "old-tip")
+            old_tip = self.continuity_commit_file(root, "PROBE.md")
+
+            self.git(root, "checkout", "-b", "side", common)
+            claim = self.continuity_claim(root, path)
+
+            self.git(root, "checkout", "-b", "long-lived", before_action)
+            long_lived = self.continuity_commit_file(root, "long-lived.md")
+            self.git(root, "merge", "--no-ff", "--no-commit", "side")
+            new_base = self.continuity_delete(
+                root, path, self.CONTINUITY_EVIDENCE_PATH
+            )
+            self.assertEqual(
+                [new_base, long_lived, claim],
+                self.git(root, "rev-list", "--parents", "-n", "1", new_base).split(),
+                "the fixture base must be a merge whose second parent is the claim",
+            )
+            self.assertIsNone(
+                RECONCILE.git_tree_path_entry(new_base, path),
+                "the fixture merge itself must delete the action",
+            )
+            own_range = self.continuity_findings(None, new_base, common)
+            self.assertEqual([], own_range, self.messages(own_range))
+
+            self.git(root, "checkout", "-b", "rewritten", new_base)
+            new_head = self.continuity_commit_file(root, "PROBE.md")
+
+            findings = self.continuity_findings(old_tip, new_head, new_base)
+            self.assertEqual([], findings, self.messages(findings))
+
+    def test_continuity_edge_follows_a_timing_move_before_the_base_resolution(
+        self,
+    ):
+        """An identity-preserving move is followed to the edge that resolves it."""
+        with self.repo() as root:
+            path = self.CONTINUITY_ACTION_PATH
+            moved = path.replace("non-blocking-", "future-blocking-")
+            common = self.continuity_root(root, path)
+            self.git(root, "checkout", "-b", "old-tip")
+            old_tip = self.continuity_commit_file(root, "PROBE.md")
+
+            self.git(root, "checkout", "-b", "base", common)
+            (root / path).rename(root / moved)
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-m", "escalate the action's timing")
+            new_base = self.continuity_resolve(root, moved)
+
+            self.git(root, "checkout", "-b", "rewritten", new_base)
+            new_head = self.continuity_commit_file(root, "PROBE.md")
+
+            findings = self.continuity_findings(old_tip, new_head, new_base)
+            self.assertEqual([], findings, self.messages(findings))
+
+    def test_continuity_edge_reports_an_invalid_redeletion_after_reintroduction(
+        self,
+    ):
+        """A merge that keeps the action reopens it; a later bare delete is judged."""
+        with self.repo() as root:
+            path = self.CONTINUITY_ACTION_PATH
+            common = self.continuity_root(root, path)
+            self.git(root, "checkout", "-b", "old-tip")
+            old_tip = self.continuity_commit_file(root, "PROBE.md")
+
+            self.git(root, "checkout", "-b", "side", common)
+            valid_deletion = self.continuity_resolve(root, path)
+
+            self.git(root, "checkout", "-b", "base", common)
+            self.continuity_commit_file(root, "base.md")
+            self.git(root, "merge", "--no-ff", "--no-commit", "side")
+            self.git(root, "checkout", common, "--", path)
+            self.git(root, "commit", "-m", "merge the side branch but keep the action")
+            self.assertIsNotNone(
+                RECONCILE.git_tree_path_entry(
+                    self.git(root, "rev-parse", "HEAD"), path
+                ),
+                "the fixture merge must reintroduce the action",
+            )
+            bad_base = self.continuity_delete(root, path)
+
+            self.git(root, "checkout", "-b", "rewritten", bad_base)
+            new_head = self.continuity_commit_file(root, "PROBE.md")
+
+            findings = self.continuity_findings(old_tip, new_head, bad_base)
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertIn(f"inherited deletion {bad_base}", findings[0].message)
+            self.assertNotIn(valid_deletion, findings[0].message)
+            self.assertIn(
+                "agent action was not committed as in-repair before deletion",
+                findings[0].message,
+            )
+
+    def test_continuity_edge_validates_a_pre_activation_base_deletion(self):
+        """A base deletion before v1 activated is judged, not skipped."""
+        with self.repo() as root:
+            path = self.CONTINUITY_ACTION_PATH
+            common = self.continuity_root(root, path, activate=False)
+            self.git(root, "checkout", "-b", "old-tip")
+            old_tip = self.continuity_commit_file(root, "PROBE.md")
+
+            self.git(root, "checkout", "-b", "base", common)
+            bad_deletion = self.continuity_delete(root, path)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "activate queue v1")
+            new_base = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "rewritten", new_base)
+            new_head = self.continuity_commit_file(root, "PROBE.md")
+
+            findings = self.continuity_findings(old_tip, new_head, new_base)
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertIn(
+                f"inherited deletion {bad_deletion}", findings[0].message
+            )
+            self.assertIn(
+                "agent action was not committed as in-repair before deletion",
+                findings[0].message,
+            )
+
+    def test_continuity_edge_keeps_finding_without_a_unique_merge_base(self):
+        """Criss-cross history has no single `C`; the raw finding stays."""
+        with self.repo() as root:
+            path = self.CONTINUITY_ACTION_PATH
+            common = self.continuity_root(root, path)
+            self.git(root, "checkout", "-b", "x")
+            x_one = self.continuity_commit_file(root, "x.md")
+            self.git(root, "checkout", "-b", "y", common)
+            self.continuity_commit_file(root, "y.md")
+
+            self.git(root, "checkout", "x")
+            self.git(root, "merge", "--no-ff", "--no-commit", "y")
+            self.git(root, "commit", "-m", "x merges y")
+            old_tip = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "y")
+            self.git(root, "merge", "--no-ff", "--no-commit", x_one)
+            self.git(root, "commit", "-m", "y merges x")
+            new_base = self.git(root, "rev-parse", "HEAD")
+            new_head = self.continuity_resolve(root, path)
+            self.assertEqual(
+                2,
+                len(self.git(root, "merge-base", "--all", old_tip, new_head).split()),
+                "the fixture must have two merge bases",
+            )
+
+            findings = self.continuity_findings(old_tip, new_head, new_base)
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertEqual(Path(path), findings[0].subject)
+            self.assertIn(
+                "divergent update discarded", findings[0].message
+            )
+
+    def test_continuity_edge_deduplicates_a_deletion_the_range_already_reports(
+        self,
+    ):
+        """The branch's own early bare deletion is one finding, not two."""
+        with self.repo() as root:
+            path = self.CONTINUITY_ACTION_PATH
+            common = self.continuity_root(root, path)
+            self.git(root, "checkout", "-b", "old-tip")
+            old_tip = self.continuity_commit_file(root, "PROBE.md")
+
+            self.git(root, "checkout", "-b", "base", common)
+            new_base = self.continuity_commit_file(root, "base.md")
+
+            self.git(root, "checkout", "-b", "rewritten", new_base)
+            self.continuity_delete(root, path)
+            new_head = self.continuity_commit_file(root, "PROBE.md")
+
+            findings = self.continuity_findings(old_tip, new_head, new_base)
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertEqual(Path(path), findings[0].subject)
+            self.assertIn(
+                "agent action was not committed as in-repair before deletion",
+                findings[0].message,
+            )
+            self.assertNotIn("inherited deletion", findings[0].message)
+
+    def test_continuity_edge_keeps_finding_when_the_base_resolved_a_rewritten_action(
+        self,
+    ):
+        """A valid base deletion of a different action resolves nothing here."""
+        with self.repo() as root:
+            path = self.CONTINUITY_ACTION_PATH
+            common = self.continuity_root(root, path)
+            self.git(root, "checkout", "-b", "old-tip")
+            old_tip = self.continuity_commit_file(root, "PROBE.md")
+
+            self.git(root, "checkout", "-b", "base", common)
+            self.write(
+                root, path, self.continuity_action("record a different result")
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "rewrite the action")
+            new_base = self.continuity_resolve(root, path)
+
+            self.git(root, "checkout", "-b", "rewritten", new_base)
+            new_head = self.continuity_commit_file(root, "PROBE.md")
+
+            findings = self.continuity_findings(old_tip, new_head, new_base)
+            self.assertEqual(1, len(findings), self.messages(findings))
+            self.assertEqual(Path(path), findings[0].subject)
+            self.assertIn(
+                "divergent update discarded", findings[0].message
+            )
+
     def test_divergent_pr_range_is_not_implicitly_a_force_push(self):
         with self.repo() as root:
             self.init_git(root)
