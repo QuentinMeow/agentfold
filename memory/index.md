@@ -54,6 +54,7 @@
 - [The owner confirmed all eight July goals, three of them with changes](decisions/2026-09-04-the-owner-confirmed-the-eight-july-goals.md) — All eight goals agents wrote in July stand as owner-confirmed goals; per-skill canaries become manual and optional, and one-command adoption and the task viewer are deferred to the end of the priority order
 
 ## lessons
+- [Land core changes from a helper worktree as patches on the task branch](lessons/automation/core-changes-commit-only-on-the-task-branch.md) — The core-scope gate accepts core changes only on a `task/<id>` branch with a valid design receipt, so a helper worktree on any other branch cannot commit them; hand its work back as patches and commit in the task worktree
 - [Reconciler findings need deterministic keys](lessons/automation/deterministic-finding-keys.md) — Auto-filed retries use full check+subject identity, digest-bearing names, and refreshable machine projections that preserve actor notes
 - [A new check and its first violation can arrive on separate green branches](lessons/automation/green-branches-can-merge-to-red.md) — Independent stack legs are only ever tested apart, so a check on one and violating text on the other produce a failure that existed on neither
 - [Pin the Unicode data used to protect source bytes](lessons/automation/invisible-byte-classification-must-not-drift-with-python.md) — Supported Python versions bundle different Unicode data, so a source-integrity predicate needs an explicit version and behavioral controls for newer assignments
