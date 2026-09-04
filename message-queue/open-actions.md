@@ -5,7 +5,7 @@ Everything this repository is waiting on, in one list. Every line below is copie
 item it links, so this file decides nothing — an answer goes in the linked file, never here.
 Regenerate it with `python3 automation/reconcile/reconcile.py --fix-open-actions`.
 
-**1 action stopping work right now.** 16 questions waiting on you, 55 actions waiting on an agent. 2 others not yours right now.
+**1 action stopping work right now.** 16 questions waiting on you, 54 actions waiting on an agent. 2 others not yours right now.
 
 ## Waiting on you
 
@@ -202,7 +202,7 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
 
   </details>
 
-### Never stops work — 47
+### Never stops work — 46
 
 - [Whenever the deferred viewer is built, build a faceted node table first, then a local neighbourhood panel, then a directory-by-directory matrix — not a force-directed graph, and with no vendored JavaScript.](needs-agent/requests/non-blocking-build-the-edge-graph-viewer-within-measured-constraints.md)
   <details><summary>what happens if nobody acts</summary>
@@ -312,7 +312,7 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
   **If you do nothing:** Merging main into a stale task branch continues to fail at pre-commit even when the staged tree equals clean main; agents must avoid that merge and start fresh from main when they need current history.
 
   </details>
-- **29 backlog tasks are waiting for an agent to pick one up.**
+- **28 backlog tasks are waiting for an agent to pick one up.**
   <details><summary>which tasks</summary>
 
   - [agent-adapter-ritual-hooks](needs-agent/requests/non-blocking-pick-up-agent-adapter-ritual-hooks.md)
@@ -343,7 +343,6 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
   - [migrate-the-review-verdicts-heading](needs-agent/requests/non-blocking-pick-up-migrate-the-review-verdicts-heading.md)
   - [stop-a-withdrawn-exemption-from-dirtying-past-edges](needs-agent/requests/non-blocking-pick-up-stop-a-withdrawn-exemption-from-dirtying-past-edges.md)
   - [stop-workspace-boundary-tests-from-flaking-under-sharding](needs-agent/requests/non-blocking-pick-up-stop-workspace-boundary-tests-from-flaking-under-sharding.md)
-  - [keep-owner-words-and-goal-fit-in-every-task](needs-agent/requests/non-blocking-pick-up-keep-owner-words-and-goal-fit-in-every-task.md)
 
   </details>
 

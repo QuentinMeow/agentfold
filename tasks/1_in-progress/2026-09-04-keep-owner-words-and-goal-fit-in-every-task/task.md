@@ -1,10 +1,10 @@
 # Keep the owner's words and a goal fit in every task
 
-**Claimed-by:** unclaimed
+**Claimed-by:** claude
 **Filed:** 2026-09-04, by claude, from chat — the owner's request is quoted verbatim in `requirements.md` beside this file
 **Parent:** none
 **Repository scope:** core
-**Queue actions:** `message-queue/needs-agent/requests/non-blocking-pick-up-keep-owner-words-and-goal-fit-in-every-task.md`
+**Queue actions:** none
 
 ## Goal
 
