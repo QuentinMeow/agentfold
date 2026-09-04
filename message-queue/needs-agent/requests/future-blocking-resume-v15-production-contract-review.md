@@ -1,6 +1,6 @@
 # Resume the serial v15 production-contract review when the reviewer service is available
 
-**Status:** open
+**Status:** in-repair
 **Filed:** 2026-09-03, by codex, from task `2026-08-02-stop-a-restack-from-being-blamed-for-another-branchs-deletion`
 **Action:** When the reviewer service accepts a normal read-only task again, run three fresh v15 reviews one at a time and resolve this item only if all three accept the same immutable commit.
 **Full context:** `docs/designs/restack-queue-provenance/pocs/production-contract/README.md`
