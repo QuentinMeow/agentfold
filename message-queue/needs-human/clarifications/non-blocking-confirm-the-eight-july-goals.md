@@ -39,7 +39,7 @@ that folds it shows you how it read your words before acting. If this page did n
 enough to decide, say so and say what is missing — that is a complete answer, not a
 rejection.
 
-**Your answer:** ______
+**Your answer:** G5 需要保留的，比如看我的 ~/code/job-finder-toolkit/. G4改成手动/可选，不强制。G6 先推迟，我希望最终有网页kanban 来看总体的任务进度。G7 说人话，什么叫“重试的重试”？你自己看看这是人能理解的句子吗？说人话。G8也是，看不懂一点，能不能讲流利中文？G3未来是需要的，但是我感觉还没准备好，未来一定要，但是现在先不做。 这些都同意，都算是goal。
 
 ## For the record
 

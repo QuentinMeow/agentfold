@@ -5,7 +5,7 @@ Everything this repository is waiting on, in one list. Every line below is copie
 item it links, so this file decides nothing — an answer goes in the linked file, never here.
 Regenerate it with `python3 automation/reconcile/reconcile.py --fix-open-actions`.
 
-**1 action stopping work right now.** 17 questions waiting on you, 54 actions waiting on an agent. 2 others not yours right now.
+**1 action stopping work right now.** 16 questions waiting on you, 54 actions waiting on an agent. 3 others not yours right now.
 
 ## Waiting on you
 
@@ -50,7 +50,7 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
 
   </details>
 
-### Never stops work — 13
+### Never stops work — 12
 
 - [Review whether the expanded explanation makes the existing template-first decision understandable; request wording changes if it does not.](needs-human/reviews/non-blocking-review-template-first-explanation.md) — answer by 2026-10-21
   <details><summary>why, and what happens if nobody acts</summary>
@@ -146,14 +146,6 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
   **Why this matters:** Anything that later quotes one of those sentences to you — a summary, a notification — would show a sentence that stops mid-thought, and nobody would notice.
 
   **If you do nothing:** Nothing stops. The two questions stay answerable as they are, and a warning about them prints on every run until you answer them.
-
-  </details>
-- [Say whether the eight July goals in the roadmap still describe where you want this repository to go, naming any that no longer do.](needs-human/clarifications/non-blocking-confirm-the-eight-july-goals.md) — answer by 2026-12-03
-  <details><summary>why, and what happens if nobody acts</summary>
-
-  **Why this matters:** Agents pick their work from these goals, so a stale one steers real effort toward something you no longer want.
-
-  **If you do nothing:** Nothing stops. The eight goals stay marked as unconfirmed agent proposals that tasks may still serve, and the two goals stated in your own words stay confirmed.
 
   </details>
 
@@ -370,5 +362,13 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
   **Why this matters:** This format controls whether you can understand and safely answer every durable request an agent ever makes of you.
 
   **If you do nothing:** The repaired format becomes and stays the repository standard without your judgment on record.
+
+  </details>
+- [Say whether the eight July goals in the roadmap still describe where you want this repository to go, naming any that no longer do.](needs-human/clarifications/non-blocking-confirm-the-eight-july-goals.md) — already answered — an agent owes the fold
+  <details><summary>why, and what happens if nobody acts</summary>
+
+  **Why this matters:** Agents pick their work from these goals, so a stale one steers real effort toward something you no longer want.
+
+  **If you do nothing:** Nothing stops. The eight goals stay marked as unconfirmed agent proposals that tasks may still serve, and the two goals stated in your own words stay confirmed.
 
   </details>
