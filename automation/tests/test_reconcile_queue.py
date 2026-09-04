@@ -7834,6 +7834,68 @@ class ReconcileQueueTests(unittest.TestCase):
             findings = self.continuity_findings(old_tip, new_head, new_base)
             self.assertEqual([], findings, self.messages(findings))
 
+    def test_continuity_edge_judges_a_deletion_reachable_only_through_a_second_parent(
+        self,
+    ):
+        """A valid deletion a merge makes against its second parent resolves.
+
+        A long-lived branch forked before the action was filed, so nothing on
+        its side ever carried the action; the side branch claimed it. The base
+        merged the claim branch into the long-lived branch and finished the
+        lifecycle in the merge commit itself: `M` deletes the action and
+        writes its evidence. The only real edge on which the action's tree
+        entry disappears is `K -> M`, and `K` is `M`'s *second* parent; the
+        first parent cannot supply the absence, because its merge base with
+        `K` predates the action. A helper that examined only first parents
+        would locate no deletion edge and keep the constant finding.
+        """
+        with self.repo() as root:
+            path = self.CONTINUITY_ACTION_PATH
+            self.init_git(root)
+            self.write(
+                root,
+                "message-queue/AGENTS.md",
+                "**Queue resolution schema:** v1\n",
+            )
+            self.write(root, "README.md", "# Common\n")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "history before the action was filed")
+            before_action = self.git(root, "rev-parse", "HEAD")
+            self.write(root, path, self.continuity_action())
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "file the action")
+            common = self.git(root, "rev-parse", "HEAD")
+
+            self.git(root, "checkout", "-b", "old-tip")
+            old_tip = self.continuity_commit_file(root, "PROBE.md")
+
+            self.git(root, "checkout", "-b", "side", common)
+            claim = self.continuity_claim(root, path)
+
+            self.git(root, "checkout", "-b", "long-lived", before_action)
+            long_lived = self.continuity_commit_file(root, "long-lived.md")
+            self.git(root, "merge", "--no-ff", "--no-commit", "side")
+            new_base = self.continuity_delete(
+                root, path, self.CONTINUITY_EVIDENCE_PATH
+            )
+            self.assertEqual(
+                [new_base, long_lived, claim],
+                self.git(root, "rev-list", "--parents", "-n", "1", new_base).split(),
+                "the fixture base must be a merge whose second parent is the claim",
+            )
+            self.assertIsNone(
+                RECONCILE.git_tree_path_entry(new_base, path),
+                "the fixture merge itself must delete the action",
+            )
+            own_range = self.continuity_findings(None, new_base, common)
+            self.assertEqual([], own_range, self.messages(own_range))
+
+            self.git(root, "checkout", "-b", "rewritten", new_base)
+            new_head = self.continuity_commit_file(root, "PROBE.md")
+
+            findings = self.continuity_findings(old_tip, new_head, new_base)
+            self.assertEqual([], findings, self.messages(findings))
+
     def test_continuity_edge_follows_a_timing_move_before_the_base_resolution(
         self,
     ):
