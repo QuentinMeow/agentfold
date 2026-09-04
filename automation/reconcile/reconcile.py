@@ -6435,6 +6435,102 @@ def queue_deletion_problem(path, text, prior_revision, revision):
     )
 
 
+DISPLACED_DELETION_PROBLEM = "divergent update discarded a live old-tip action"
+
+
+def continuity_deletion_problem(old_tip, new_head, path):
+    """Explain one path the displaced tip carried and the new head lacks.
+
+    The continuity edge ``old_tip -> new_head`` is synthetic: no commit made
+    it, so nothing on it can carry a claim or evidence, and a raw two-tree
+    diff cannot tell a deletion the rewrite made from one it inherited by
+    restacking onto a base that resolved the action. The verdict therefore
+    comes from real edges. When the old lineage left the path exactly as the
+    unique merge base ``C`` had it, the rewrite never touched the action, and
+    every real parent->child edge in ``C..new_head`` on which the path's tree
+    entry disappears is judged with the ordinary deletion rules at that edge
+    -- pre-activation edges included, because nothing else re-audits them,
+    and a merge edge only when no other parent supplied the absence through a
+    real deletion. An identity-preserving timing move is followed to its
+    destination. Authorship is never consulted, only committed objects are
+    read, and a Git failure raises ``GitSnapshotError``.
+
+    Returns ``(problem, inherited)``. ``problem`` is ``None`` when no located
+    edge was invalid and at least one validated edge deleted the same action
+    identity ``C`` carried. An invalid located edge returns its own problem
+    text with ``inherited`` naming that commit. Everything the joined history
+    cannot explain -- no unique merge base, a path the old lineage authored
+    or changed after ``C``, or no located deletion edge -- keeps the constant
+    displaced-tip problem with ``inherited`` ``None``, so nothing waits
+    silently.
+    """
+    bases = subprocess.run(
+        [*RAW_GIT, "merge-base", "--all", old_tip, new_head],
+        cwd=REPO,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if bases.returncode not in (0, 1):
+        raise GitSnapshotError(
+            bases.stderr.strip()
+            or f"could not find the merge bases of {old_tip} and {new_head}"
+        )
+    common = bases.stdout.split()
+    if len(common) != 1:
+        return DISPLACED_DELETION_PROBLEM, None
+    common = common[0]
+    if git_tree_path_entry(old_tip, path) \
+            != git_tree_path_entry(common, path):
+        return DISPLACED_DELETION_PROBLEM, None
+    identity = queue_action_identity(path, git_text_at(common, path))
+    history = subprocess.run(
+        [
+            *RAW_GIT, "rev-list", "--reverse", "--topo-order",
+            "--parents", f"{common}..{new_head}",
+        ],
+        cwd=REPO,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if history.returncode:
+        raise GitSnapshotError(
+            history.stderr.strip()
+            or f"could not enumerate the history {new_head} joined"
+        )
+    tracked = {path}
+    resolved = False
+    for line in history.stdout.splitlines():
+        child, *parents = line.split()
+        for parent in parents:
+            for current in sorted(tracked):
+                if git_tree_path_entry(parent, current) is None \
+                        or git_tree_path_entry(child, current) is not None:
+                    continue
+                if current not in deleted_paths_between(parent, child):
+                    tracked.update(
+                        destination
+                        for source, destination
+                        in mutated_paths_between(parent, child)
+                        if source == current
+                    )
+                    continue  # an identity-preserving move, not a deletion
+                if candidate_paths_match_other_parent(
+                    parent, child, (current,)
+                ):
+                    continue  # the merge adopted another parent's deletion
+                text = git_text_at(parent, current)
+                problem = queue_deletion_problem(current, text, parent, child)
+                if problem:
+                    return problem, child
+                if queue_action_identity(current, text) == identity:
+                    resolved = True
+    return (None if resolved else DISPLACED_DELETION_PROBLEM), None
+
+
 def check_queue_resolution():
     if not (REPO / ".git").exists():
         return
@@ -6511,24 +6607,39 @@ def check_queue_resolution():
             )
     for events, is_continuity_edge in deletion_event_groups:
         for path, text, prior_revision, revision in events:
-            problem = (
-                "divergent update discarded a live old-tip action"
-                if is_continuity_edge
-                else queue_deletion_problem(
+            inherited = None
+            if is_continuity_edge:
+                problem, inherited = continuity_deletion_problem(
+                    prior_revision, revision, path
+                )
+            else:
+                problem = queue_deletion_problem(
                     path, text, prior_revision, revision
                 )
-            )
-            if problem:
-                identity = (path, problem)
-                if identity in reported:
-                    continue
-                reported.add(identity)
+            if not problem:
+                continue
+            # The ordinary range judges its own edges first; a continuity
+            # verdict repeating one of them is the same finding, not a second.
+            identity = (path, problem)
+            if identity in reported:
+                continue
+            reported.add(identity)
+            if inherited is None:
                 yield Finding(
                     "queue-resolution",
                     Path(path),
                     f"deleted unresolved queue item: {problem}",
                     "commit the required claim/response evidence before deleting it",
                 )
+                continue
+            yield Finding(
+                "queue-resolution",
+                Path(path),
+                "deleted unresolved queue item: inherited deletion "
+                f"{inherited} lacks its own lifecycle evidence: {problem}",
+                "repair or revert the base deletion; force-pushing this "
+                "branch cannot resolve it",
+            )
 
 
 def check_queue_frozen_skeleton():
