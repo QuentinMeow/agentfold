@@ -41,3 +41,11 @@ The owner authorized recovery of all useful local and open-PR changes. Codex res
 ## 2026-08-31 — verified replacement publication
 
 The useful implementation and original commit history are retained and repaired in [PR91](https://github.com/QuentinMeow/agentfold/pull/91), stacked above PR90. The conflicting original PR89 is closed. Recovery child `2026-08-30-repair-human-question-evidence` owns the current checks; [its verification](../2026-08-30-repair-human-question-evidence/verification.md) records the actual output and review limits. Existing questions and human-authored responses are unchanged. Neither replacement is merged to main.
+
+
+## 2026-09-25 — close the merged task record (codex)
+
+- Independently checked the completed scope against the task, plan, historical evidence, and retained implementation. The six acceptance criteria are checked. The original probes and the upper recovery task document source quotation checks, exact unmet-review continuation, advisory disposition, and the retained authoring limits. The recovered implementation is now in main.
+- Confirmed PR91 is represented by merge commit `0c9387ef8d5cd973fac6c80fd94e95da61db0c8e`, an ancestor of the audit baseline. Moved this task from `3_in-review` to `4_done`; no implementation behavior changes in this records-only closeout.
+- The recorded incomplete end-to-end authoring evaluation remains a limitation; the direct mechanism probes and recovery evidence are not recast as a successful authoring evaluation.
+- Preserved all existing requirements, claimant text, acceptance criteria, queue links, and historical evidence. The new verification entry proves merge ancestry; it does not claim historical test logs verify today's code.

@@ -53,3 +53,14 @@ immutable history naming paths that have legitimately moved.
 ## 2026-08-31 — verified replacement publication
 
 The useful implementation and original commit history are retained and repaired in [PR91](https://github.com/QuentinMeow/agentfold/pull/91), stacked above PR90. The conflicting original PR89 is closed. Recovery child `2026-08-30-repair-human-question-evidence` owns the current checks; [its verification](../2026-08-30-repair-human-question-evidence/verification.md) records the actual output and review limits. Existing questions and human-authored responses are unchanged. Neither replacement is merged to main.
+
+
+## 2026-09-25 — merged-task closeout
+
+At audit baseline `511e5bf7091c66f111e2312dd7e9880476d449e4`, the following command ran in the isolated closeout worktree:
+
+```text
+$ git merge-base --is-ancestor 0c9387ef8d5cd973fac6c80fd94e95da61db0c8e HEAD
+```
+
+The command produced no output and exited 0. PR91 is therefore contained in this baseline. The dated checks above remain historical evidence for their recorded candidates; this records-only closeout did not rerun the product test suites.

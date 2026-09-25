@@ -171,3 +171,14 @@ CLAUDE.md shims (this worktree): 12 in place
 skill adapters (this worktree): .claude, .cursor, .agents -> skills/
 install: done (run once in every linked worktree; safe to rerun when skills or AGENTS.md files change)
 ```
+
+
+## 2026-09-25 — merged-task closeout
+
+At audit baseline `511e5bf7091c66f111e2312dd7e9880476d449e4`, the following command ran in the isolated closeout worktree:
+
+```text
+$ git merge-base --is-ancestor 3f9ee8920510f7a72c7a979828a3981adbecbd68 HEAD
+```
+
+The command produced no output and exited 0. PR79 is therefore contained in this baseline. The dated checks above remain historical evidence for their recorded candidates; this records-only closeout did not rerun the product test suites.
