@@ -24,6 +24,6 @@ Historical test transcripts remain historical. Current validation includes the w
 
 ## Scope and known limits
 
-The continuity mutation defect remains owned by task `2026-09-04-judge-inherited-queue-mutations-on-their-real-edges`. The architecture reader found no recorded evidence for the five owner acceptance experiments or an operations manual. The test suite does not substitute for those experiments. Frozen human questions and the external-review authorization remain live and unchanged.
+Source review identified the inherited-mutation concern; this audit did not execute its reproduction. The existing task first establishes an observed-red case and retains negative controls. That concern remains owned by task `2026-09-04-judge-inherited-queue-mutations-on-their-real-edges`. The architecture reader found no recorded evidence for the five owner acceptance experiments or an operations manual. The test suite does not substitute for those experiments. Frozen human questions and the external-review authorization remain live and unchanged.
 
 The task claim is published on this task branch. Automatic approval review rejected the repository convention's direct push of lifecycle commits to main; this run uses a pull request instead and does not bypass that rejection.

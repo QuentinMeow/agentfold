@@ -5,7 +5,7 @@ Everything this repository is waiting on, in one list. Every line below is copie
 item it links, so this file decides nothing — an answer goes in the linked file, never here.
 Regenerate it with `python3 automation/reconcile/reconcile.py --fix-open-actions`.
 
-**1 action stopping work right now.** 16 questions waiting on you, 57 actions waiting on an agent. 2 others not yours right now.
+**1 action stopping work right now.** 16 questions waiting on you, 58 actions waiting on an agent. 2 others not yours right now.
 
 ## Waiting on you
 
@@ -151,7 +151,7 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
 
 ## Waiting on an agent
 
-### Stops work at a named boundary — 8
+### Stops work at a named boundary — 9
 
 - [After `2026-07-24-layered-development-workspace` is reviewed, verified, and done, verify its completion evidence and remove this dependency action and its reciprocal task link before claiming the manifest task.](needs-agent/requests/future-blocking-complete-parent-before-workspace-manifest.md) — blocks transition:start task:2026-07-24-declare-layered-workspace-manifest
   <details><summary>what happens if nobody acts</summary>
@@ -199,6 +199,12 @@ line. That is the whole protocol — one edit, and nothing else to fill in.
   <details><summary>what happens if nobody acts</summary>
 
   **If you do nothing:** Implementation, tests, and independent review may continue.
+
+  </details>
+- [Resolve the machine-record task's zero-unscoped-findings acceptance criterion against the recorded counterexamples before completing the task.](needs-agent/requests/future-blocking-resolve-machine-record-acceptance-evidence.md) — blocks transition:complete task:2026-08-18-fold-the-queue-machine-record
+  <details><summary>what happens if nobody acts</summary>
+
+  **If you do nothing:** Keep the machine-record task in review; its merged implementation and unrelated work remain usable.
 
   </details>
 

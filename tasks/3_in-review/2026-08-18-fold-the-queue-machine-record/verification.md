@@ -956,3 +956,18 @@ inherited pair should not be requoted.
 ## 2026-08-31 — verified recovery publication
 
 The useful implementation and complete original commit history are retained and repaired in [PR90](https://github.com/QuentinMeow/agentfold/pull/90). The conflicting original PR88 is closed. The recovery task `2026-08-30-rebuild-the-open-pr-stack` records the current implementation checks; [its verification](../2026-08-30-rebuild-the-open-pr-stack/verification.md) preserves actual output. The test-file count in the original acceptance criterion now names all 16 current files; current main added a file after the original 15-file result, whose historical output remains preserved. Existing human questions and the original claimant remain unchanged. No product merge to main was performed.
+
+## 2026-09-25 — read-only acceptance counterexamples
+
+```text
+$ PYTHONDONTWRITEBYTECODE=1 python3 - <<'PY'
+import importlib.util
+from pathlib import Path
+s=importlib.util.spec_from_file_location('reconcile',Path('automation/reconcile/reconcile.py'));m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
+for name in ('.github/pull_request_template.md','message-queue/open-actions.md','templates/pull-request.md'):
+ print(name, len(m.fold_shape_problems(Path(name).read_text())), 'fold-shape finding(s)')
+PY
+.github/pull_request_template.md 1 fold-shape finding(s)
+message-queue/open-actions.md 1 fold-shape finding(s)
+templates/pull-request.md 1 fold-shape finding(s)
+```

@@ -146,3 +146,16 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 ## 2026-08-31 — verified recovery publication
 
 The useful implementation and complete original commit history are retained and repaired in [PR90](https://github.com/QuentinMeow/agentfold/pull/90). The conflicting original PR88 is closed. The recovery task `2026-08-30-rebuild-the-open-pr-stack` records the current implementation checks; [its verification](../2026-08-30-rebuild-the-open-pr-stack/verification.md) preserves actual output. The test-file count in the original acceptance criterion now names all 16 current files; current main added a file after the original 15-file result, whose historical output remains preserved. Existing human questions and the original claimant remain unchanged. No product merge to main was performed.
+
+## 2026-09-25 — completion-evidence audit (codex)
+
+The implementation is merged, but the final checked acceptance criterion is not proven:
+it demands zero findings from all new predicates unscoped, whereas the preserved transcript
+records 38 results and a current read-only fold-shape probe still returns three. The
+fresh-context correctness review and a separate challenger independently found the gap.
+This task remains in review; no acceptance criterion or historical transcript was rewritten.
+
+[Resolve the machine-record task's zero-unscoped-findings acceptance criterion against the recorded counterexamples before completing the task.](message-queue/needs-agent/requests/future-blocking-resolve-machine-record-acceptance-evidence.md)
+
+The recovery transcript is preserved at the
+[immutable audit baseline](https://github.com/QuentinMeow/agentfold/blob/f98dcd552fc016441478b4fe15920c9f8ad3f05e/tasks/3_in-review/2026-08-30-rebuild-the-open-pr-stack/verification.md).

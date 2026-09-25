@@ -12,7 +12,9 @@ continuity repair, publication authority, takeover, or the five acceptance exper
 
 ### 1a. Inherited queue mutations
 
-A restack can combine an already committed answer and claim into a synthetic mutation. The first check is a red regression against the current checker; then real-edge validation must preserve refusal of actual rewrites.
+Source review identified a path that can combine an already committed answer and claim
+into a synthetic mutation during restacking. This audit did not execute that reproduction.
+The first check is an observed-red regression against the current checker; then real-edge validation must preserve refusal of actual rewrites.
 
 [When this backlog item is selected, claim it and remove this completed pickup request in the same coordination commit.](message-queue/needs-agent/requests/non-blocking-pick-up-judge-inherited-queue-mutations-on-their-real-edges.md)
 
@@ -51,7 +53,7 @@ Status moves currently invalidate historical task-folder links. This task alread
 
 ### 4c. Task-status drift detection
 
-Seven manual closeouts in this audit show the recurring maintenance cost. The existing task must distinguish a merged PR from complete acceptance and keep provider queries off ordinary commit checks.
+Six manual closeouts in this audit show the recurring maintenance cost. The existing task must distinguish a merged PR from complete acceptance and keep provider queries off ordinary commit checks.
 
 [When this backlog item is selected, claim it and remove this completed pickup request in the same coordination commit.](message-queue/needs-agent/requests/non-blocking-pick-up-notice-a-task-whose-work-already-merged.md)
 
@@ -60,6 +62,14 @@ Seven manual closeouts in this audit show the recurring maintenance cost. The ex
 The new bounded child task produces operational evidence and a short manual after the prerequisites it relies on are ready. A designed rule or a passing unit suite is not a passing end-to-end scenario.
 
 [Claim the five-scenario workflow proof task and record observed results plus its operations manual after its prerequisite repairs are ready.](message-queue/needs-agent/requests/non-blocking-pick-up-five-parallel-workflow-scenarios.md)
+
+## Completion evidence carried forward
+
+The machine-record task remains in review. Its ordinary checks pass, but the final
+acceptance checkbox contradicts unscoped predicate results. This audit does not silently
+weaken the criterion or treat a merged implementation as full acceptance.
+
+[Resolve the machine-record task's zero-unscoped-findings acceptance criterion against the recorded counterexamples before completing the task.](message-queue/needs-agent/requests/future-blocking-resolve-machine-record-acceptance-evidence.md)
 
 ## Dependency and concurrency limits
 
