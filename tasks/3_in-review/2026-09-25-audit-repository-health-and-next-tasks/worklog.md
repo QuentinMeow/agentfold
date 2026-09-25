@@ -17,3 +17,6 @@
 
 - The corrected candidate 5a696f5 passed all three independent lenses. Their original and revised reports, plus the closure challenge, are preserved as raw review-evidence artifacts. The rejected initial panel and its two findings remain visible in those reports.
 - The fresh-checkout full suite passed 17/17 files in 163.79 seconds. Three repository-corpus/history tests skipped by the normal isolated runner then passed directly in the refreshed disposable clone at the revised candidate. The remaining non-UTF-8 environment case and opt-in record-free full-suite probe were not run.
+
+- Published the reviewed branch as [PR98](https://github.com/QuentinMeow/agentfold/pull/98), attached it to the Codex task, and validated its action-projection body locally. The audit moves to review; no merge of this task into main is claimed.
+- The final handover uses immutable evidence links and the sixteen currently unanswered human-action projections. The detector-failure receipt already has a response and the artifact-pending re-review is not a ready human action, so neither is re-asked.

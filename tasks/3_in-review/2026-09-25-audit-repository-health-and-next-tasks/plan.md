@@ -5,4 +5,4 @@
 - [x] 3. Select bounded repairs and document their portability and verification approach.
 - [x] 4. Integrate isolated worker changes and refresh stale factual descriptions.
 - [x] 5. Run three independent verification lenses and final repository checks.
-- [ ] 6. Publish the pull request, handover, and ordered next-task plan with canonical action links.
+- [x] 6. Publish the pull request, handover, and ordered next-task plan with canonical action links.

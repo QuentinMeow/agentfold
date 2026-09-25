@@ -141,3 +141,10 @@ before this verdict. A separate challenger independently confirmed the acceptanc
 and the safe unpublished-history correction. Full original and revised report text is
 preserved in this task's `review-evidence/` JSON artifacts. Cross-vendor refuter: DID NOT RUN
 (S2 native panel; no additional external transmission authorized).
+
+## Final handover and task-transition check
+
+```text
+$ python3 automation/reconcile/reconcile.py --check
+reconcile: 0 blocking finding(s), 6 advisory (not blocking)
+```
