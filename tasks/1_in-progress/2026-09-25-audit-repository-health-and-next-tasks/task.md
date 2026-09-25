@@ -3,7 +3,7 @@
 **Claimed-by:** codex-repo-health
 **Filed:** 2026-09-25, by codex, from chat
 **Parent:** none
-**Repository scope:** core
+**Repository scope:** records-only
 **Queue actions:** none
 
 ## Goal
