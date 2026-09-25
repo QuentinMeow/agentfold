@@ -62,3 +62,14 @@ PASS services/quote-cli/tests/test_quote_cli.py
 tests: 15/15 files passed
 test elapsed: 104.87s
 ```
+
+
+## 2026-09-25 — merged-task closeout
+
+At audit baseline `511e5bf7091c66f111e2312dd7e9880476d449e4`, the following command ran in the isolated closeout worktree:
+
+```text
+$ git merge-base --is-ancestor 6b6b74ae01897e747caf0277beefab62e368219f HEAD
+```
+
+The command produced no output and exited 0. PR83 is therefore contained in this baseline. The dated checks above remain historical evidence for their recorded candidates; this records-only closeout did not rerun the product test suites.

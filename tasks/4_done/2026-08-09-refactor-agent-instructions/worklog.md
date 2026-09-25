@@ -54,3 +54,11 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   successfully; no repository or credential change was needed.
 - Moved the task to `3_in-review`. It has no queued review action, so the pull request
   presents the verified change without inventing a second action ledger.
+
+
+## 2026-09-25 — close the merged task record (codex)
+
+- Independently checked the completed scope against the task, plan, historical evidence, and retained implementation. The five acceptance criteria are checked and supported by the preserved scoped-contract audit, link/reconciler checks, and full-suite transcript. Current contracts retain their scoped routing and the contract-aware defaults.
+- Confirmed PR83 is represented by merge commit `6b6b74ae01897e747caf0277beefab62e368219f`, an ancestor of the audit baseline. Moved this task from `3_in-review` to `4_done`; no implementation behavior changes in this records-only closeout.
+- The related lexical-restatement automation remains future work in its existing queue request; this task has no Queue actions to remove.
+- Preserved all existing requirements, claimant text, acceptance criteria, queue links, and historical evidence. The new verification entry proves merge ancestry; it does not claim historical test logs verify today's code.

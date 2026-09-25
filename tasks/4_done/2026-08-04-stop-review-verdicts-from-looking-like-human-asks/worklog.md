@@ -783,3 +783,11 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - The residue the panel named is recorded beside the receipt in
   [verification.md](verification.md), including two items an earlier record wrongly
   claimed were repaired.
+
+
+## 2026-09-25 — close the merged task record (codex)
+
+- Independently checked the completed scope against the task, plan, historical evidence, and retained implementation. The five acceptance criteria are checked and supported by the preserved parser/action-classification checks and the final revision-bound review. The documented fail-closed rendering and historical merge-edge limits remain part of the record.
+- Confirmed PR82 is represented by merge commit `11cfaf31f0f6f7eaa31944ddfb39cc9c40d11d7d`, an ancestor of the audit baseline. Moved this task from `3_in-review` to `4_done`; no implementation behavior changes in this records-only closeout.
+- Both non-blocking GitHub projection actions remain linked and open; completion does not release the issue 80 provider source.
+- Preserved all existing requirements, claimant text, acceptance criteria, queue links, and historical evidence. The new verification entry proves merge ancestry; it does not claim historical test logs verify today's code.

@@ -3526,3 +3526,14 @@ enforces, and each is recorded here rather than carried silently.
 - core-fit / fail-open lens: approve — No verdict left the tally unreported, and every blanked byte stayed a verdict token
 - core-fit / regression lens: approve — Both fail-opens closed and zero flips across 645 files, 90 task dirs and every action record
 - core-fit / honesty lens: approve — Both placement mutations die with their own tests; 120,000 fuzzed receipts lost no verdict.
+
+
+## 2026-09-25 — merged-task closeout
+
+At audit baseline `511e5bf7091c66f111e2312dd7e9880476d449e4`, the following command ran in the isolated closeout worktree:
+
+```text
+$ git merge-base --is-ancestor 11cfaf31f0f6f7eaa31944ddfb39cc9c40d11d7d HEAD
+```
+
+The command produced no output and exited 0. PR82 is therefore contained in this baseline. The dated checks above remain historical evidence for their recorded candidates; this records-only closeout did not rerun the product test suites.
