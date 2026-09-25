@@ -1,14 +1,22 @@
 # Current state
 
-**Last-updated:** 2026-09-04
+**Last-updated:** 2026-09-25
 
-What is true today, mapped to the desired-state goals.
+What is true today, mapped to the desired-state goals. AgentFold provides portable,
+file-based collaboration: task folders record work, queue files own pending actions,
+and repository checks verify the records. The highest-priority goal remains parallel
+human-agent development ([G9](desired-state.md#g9--several-coding-agents-develop-this-repository-in-parallel-see-each-others-tasks-resume-after-an-interruption-and-stop-later-pull-requests-from-re-resolving-the-same-refactor-conflict)).
+Its development-cycle design merged in PR #94, and the inherited-deletion repair merged
+in PR #97. The five disposable acceptance experiments have not run, and the operations
+manual does not exist; task `2026-08-03-plan-multi-worktree-safety-remediation` records
+that remaining work. Dated incident notes below distinguish earlier failures from their
+verified outcomes.
 
 - **Structure**: all eleven top-level folders exist and follow their own contracts;
   `docs/designs/` holds durable proposals separately from principles and ADRs; task
   folders carry `requirements.md`, the owner's words verbatim, dated, and append-only
   (required for tasks filed on or after 2026-09-04); the bootstrap task
-  (`2026-07-22-bootstrap-the-harness`, in `tasks/4_done/`) is the worked example of
+  (`2026-07-22-bootstrap-the-harness`) is the worked example of
   the full lifecycle.
 - **Enforcement**: `automation/reconcile/reconcile.py` checks queue/task/memory/handover
   schemas, queue timing names/fields, task↔queue links, new handover projections, link
@@ -40,7 +48,7 @@ What is true today, mapped to the desired-state goals.
   adapter. Its two admission jobs no longer read a merge revision the payload has not
   computed yet: each binds the candidate through the merge commit's own parents, whose
   object ids that commit's identifier already covers, so the binding is knowable on the
-  first event. Pull requests opened after that merged are green on both.
+  first event. Subsequent pull requests passed both jobs after that repair merged.
   No template↔check drift detection yet. Four provenance checks read the owner's
   words and each task's goal fit: `task-provenance` (blocking) requires a task filed on
   or after 2026-09-04 to carry `requirements.md`, a `[user <date>]` or `[derived]`
@@ -59,16 +67,19 @@ What is true today, mapped to the desired-state goals.
   `git cat-file --batch` reader and caches facts under immutable object IDs; and
   `--staged` maps every staged path through an input-ownership table, so a records-only
   commit selects no test at all and names every file it skipped. A records-only
-  pre-commit run measures 0.02s in the test step. The complete local suite is still
-  ~120s serially, with system time above user time, so it remains bound by process
-  creation rather than computation. Sharding below the file, background-maintenance
+  pre-commit run measured 0.02s in the test step. The complete local suite then took
+  ~120s serially, with system time above user time, identifying process creation as
+  the bottleneck in that measurement. Sharding below the file, background-maintenance
   isolation, in-process fixture history and a machine-independent link check are now
   merged too; measured together the complete suite ran in 38.31s against 124.77s serial
-  in the same session, and later sessions on the same host measure it between 25s and
-  50s, so only same-session pairs compare. Investigation, the levers, and the one
+  in the same session, and later recorded sessions on the same host measured it between
+  25s and 50s, so only same-session pairs compare. These are historical measurements,
+  not timings of the current suite. Investigation, the levers, and the one
   approach ruled out by measurement: `docs/designs/fast-local-test-feedback.md`. The
-  action-projection gate's own per-path Git reads are the open item, in review at 84
-  processes down to 2 per run.
+  action-projection gate's batched Git reads merged in PR #32 (`1d94100`); the task's
+  recorded before/after probe used 84 Git processes before and 2 after per run, with
+  identical findings. Its full-suite measurements did not demonstrate a speedup. Task
+  `2026-07-30-batch-action-projection-git-reads` is done.
 - **Skills**: five portable skills ship (`ask-me-anything`, `explain-to-human`,
   `session-handover`, `adversarial-review`, `memory-gardener`) as agent-agnostic SKILL.md
   protocols; the gardener is a protocol only — no script yet. Each treats the message queue
@@ -89,18 +100,19 @@ What is true today, mapped to the desired-state goals.
   truthfully reads the human's sentence is an agent attestation, recorded as a known
   issue rather than implied. Every `templates/queue/` file is copy-and-fill valid, with
   no field a check reads left inside an HTML comment. PRs #7, #11, and #12 are admitted on
-  main; their still-unanswered human review items are now bound to immutable ranges
-  without treating those provider merges as review answers. PRs #8 and #10 landed on
+  main without treating those provider merges as review answers. The two unanswered
+  reviews retain their immutable ranges; the first-class-queue review was later folded,
+  as recorded below. PRs #8 and #10 landed on
   PR #7's already-merged branch and were superseded by the hardened main recoveries.
-- **Stuck queue state (2026-07-31)**: the agent request whose repair merged before its
-  deletion could be attempted is resolved, and its task
-  (`2026-07-25-fix-handover-projection-code-span-copy`) is done. The three merge reviews
-  whose ranges are already ancestors of main are measured, not forced: replaying
-  `--at-transition merge` reports all three unresolved, a fresh approval cannot satisfy a
-  merge that already happened, and deletion is refused. They stay live and unanswered, with
-  one canonical item under `message-queue/needs-human/decisions/` carrying their
-  disposition; their three tasks stay in `tasks/3_in-review/` with the measurement recorded
-  in each worklog.
+- **Former queue deadlock (2026-07-31; repaired 2026-08-01)**: the agent request whose
+  repair merged before its deletion could be attempted is resolved, and task
+  `2026-07-25-fix-handover-projection-code-span-copy` is done. Three human reviews once
+  bound merges that had already happened, so their original boundaries could not be
+  satisfied by a later answer. The human-gating repair removed those Git boundaries;
+  the two still-unanswered reviews remain answerable without withholding task completion.
+  The first-class-queue review was folded as `changes-requested`, with its remaining
+  redesign action recorded below. The owner's disposition question remains live under
+  `message-queue/needs-human/decisions/`; it does not hold the tasks in review.
 - **Contract text (2026-07-31)**: contract precedence is stated in exactly one file,
   `handbook/principles/folder-as-a-service.md`, after root `AGENTS.md` and
   `handbook/AGENTS.md` spent a while deferring to each other in a loop. The queue
@@ -112,7 +124,7 @@ What is true today, mapped to the desired-state goals.
   waiting on a human decision, because principles are near-immutable. ADRs gained
   `**Amends:**`/`**Amended-by:**` for a partial reversal, and `memory/index.md` marks an
   amended decision `[amended]` so an overturned clause is no longer advertised as live.
-- **Instruction hierarchy (2026-08-09)**: the root contract is a 79-line startup,
+- **Instruction hierarchy (2026-08-09)**: the root contract is a concise startup,
   routing, lifecycle, and invariant map instead of a second copy of subtree procedures.
   Automation and history contracts retain their actionable editing/current-schema rules
   while routing enforced implementation detail to code, tests, and templates. Every
@@ -146,14 +158,15 @@ What is true today, mapped to the desired-state goals.
   now verifies only declared root/Git-metadata separation and reports every stronger
   claim as uninspected, unverified, or blocked. Its six follow-up tasks are now live in
   backlog with queue-owned pickups and mechanical start dependencies; manifest work
-  remains blocked until the parent review is explicitly resolved and the parent task
-  reaches done. Admitted sessions, mounts, export, and publication are not yet real.
+  remains blocked by its live start dependency: the parent task is done, but its human
+  review is still unanswered and the dependency action has not been resolved. Admitted
+  sessions, mounts, export, and publication are not yet real.
 - **Markdown edge graph (2026-07-25)**: the owner answered all eight open decisions and
   they are folded into three ADRs — the accepted architecture in
   [the edge-graph architecture decision](../memory/decisions/2026-07-25-markdown-edge-graph-architecture.md),
   plus the repo-root path-type default and the author-one-direction rule. The design is
-  in `docs/designs/markdown-edge-graph.md`. Stage 0 is implemented on pull request 13 and
-  not merged: heading anchors are now validated inside `link-check`, closing a hole where
+  in `docs/designs/markdown-edge-graph.md`. Stage 0 merged in PR #13 (`74b9d0d`):
+  heading anchors are now validated inside `link-check`, closing a hole where
   a link carrying a fragment had neither its path nor its anchor checked; a stdlib
   advisory co-change mining CLI walks git history and always exits 0; and an append-only
   accept/reject ledger beside it now holds 29 real verdicts. The gating experiment
@@ -167,18 +180,13 @@ What is true today, mapped to the desired-state goals.
   implemented rather than rejected, each with a stated revisit trigger. The two deferred
   stage requests that asserted those decisions were still open were retired and re-filed
   with corrected context, because a live queue item's action text cannot be edited in
-  place. The Stage 0 transcripts are still owed, and mining also surfaced a live drift
-  plus a fivefold restatement now filed as `2026-07-25-single-source-queue-prefix-rule`.
-  The mining task reached `tasks/4_done/` on 2026-08-01 without closing that gap, so the
-  ordering action that held the backfill task unclaimed is resolved on its own terms
-  (2026-08-02): its verification file was re-read, and all four owed sections — the
-  anchor-hole before-state, both new `link-check` findings, and the `agents-budget` run
-  over `automation/AGENTS.md` — are still absent, so the backfill task's scope narrows to
-  nothing and stands at four. `grep -n "agents-budget\|link-check"` over that file matches
-  only the header sentence that says they are missing. The backfill task
-  `2026-07-25-complete-stage-0-verification-transcripts` is now claimable through its
-  pickup request alone, and no session can now collide in that file, because the task that
-  owned it is done.
+  place. The four missing Stage 0 verification transcripts were appended by task
+  `2026-07-25-complete-stage-0-verification-transcripts`, merged in PR #70 (`3b6d4d2`).
+  Its verification record confirms that the mining task's existing 906 lines remained
+  byte-identical. Both tasks are done; the transcript backfill is no longer claimable.
+  The queue-prefix restatement found by mining was also repaired in the completed task
+  `2026-07-25-single-source-queue-prefix-rule`. The later edge-schema and join work
+  remains in the agent queue under the owner's narrowed scope.
 - **Task scope at the pull-request boundary (2026-08-01)**: the projection gate and the
   reconciler required opposite things of the same commit, and six open pull requests were
   stopped by it. `check_queue_task_reciprocity` requires a live queue item declaring
@@ -188,9 +196,9 @@ What is true today, mapped to the desired-state goals.
   every task the trusted range carries, a task-named branch must be among them, and the
   projection covers the union. The merge boundary had the same root and now skips an
   unanswered action the range itself filed, matched by action identity so a timing
-  escalation still counts, and never an answered one. Replaying all six pull requests:
-  three pass, two report a finding about their own description, and one is still refused
-  because its branch names a task filed in no commit on any branch. Still over-broad, and
+  escalation still counts, and never an answered one. At that point, replaying all six pull requests
+  passed three, reported a description finding on two, and refused one because its
+  branch named a task filed in no commit on any branch. Still over-broad, and
   written down rather than fixed: a `task:<id>` merge boundary activates for any non-task
   branch that edits that task's record.
 - **Human-attention format (2026-07-31)**: the owner's review of the first-class
@@ -203,10 +211,12 @@ What is true today, mapped to the desired-state goals.
   re-asking a question already answered. The response is now transcribed byte-exactly onto
   main-line, the review is folded, and the repair it demanded is live as
   `message-queue/needs-agent/requests/future-blocking-redesign-human-action-files.md` with
-  its promised re-review. An action-first format is designed but not adopted: the
-  implementation on that stale branch is design input only, because its 1,849-line
-  `automation/markdown_semantics.py` rewrite was blocked by its own adversarial parser lens
-  three times and never tested against the current reconciler.
+  its promised re-review. The action-first format
+  subsequently merged in PR #56 and was hardened by the recovery in PRs #90 and #91.
+  New questions use that format; migration of existing frozen questions remains pending.
+  The stale branch's 1,849-line `automation/markdown_semantics.py` rewrite was design
+  input only: its own adversarial parser lens blocked it three times, and it was never
+  tested against the then-current reconciler.
 - **Human gating (2026-08-01)**: nothing a human owes holds a Git edge. A
   `needs-human/` item may withhold only the start of a task still in `0_backlog` or one
   act with no undo; `transition:merge|review|complete` and `Blocks now: task:<id>` are
@@ -246,9 +256,11 @@ What is true today, mapped to the desired-state goals.
   repository stable. Until then a green trunk is evidence about the last push window only, so
   the merged result is verified before landing rather than the branch alone. Approval
   classification stays attested by the same decision round.
-- **Not yet real**: one-command adoption installer, eval canaries, packaged
-  layered public/private workspace, queue viewer, design-review hardening — see
-  `desired-state.md` goals G1–G8.
+- **Not yet real**: the end-to-end parallel-agent workflow and its acceptance evidence
+  remain incomplete. The packaged layered workspace, template/check drift detection,
+  remaining design-review hardening, and optional skill canaries are also unfinished.
+  The owner has deferred the task viewer and one-command adoption;
+  `desired-state.md` preserves their priority and scope.
 - **Explaining the work (2026-08-02)**: `skills/explain-to-human/` states one standard for
   everything a human reads — three layers, effect before mechanism, a before and an after
   per change claim, glossed local vocabulary, one worked example, calibrated uncertainty,
@@ -260,8 +272,12 @@ What is true today, mapped to the desired-state goals.
   `handbook/decision-guide.md` were rewritten to obey the rules they state; a rule-by-rule
   inventory and an independent audit of that rewrite are committed as task evidence.
   Publishing the branch and reporting to the owner are now steps 8 and 9 of the
-  end-of-session ritual. None of the readability rules is machine-checked; whether any
-  should be is a live decision under `message-queue/needs-human/decisions/`.
+  end-of-session ritual. The machine-visible readability rules now produce advisory
+  findings: PR section presence and order, choice-example consequences, and summary
+  length. Semantic clarity remains a reviewer judgment. PR #66
+  (`d16e8a3`) implemented the owner's
+  [advisory-readability decision](../memory/decisions/2026-08-02-readability-enforcement-disposition.md);
+  these findings never fail the commit gate.
 - **The two agent actions pinning the first-class-queue task (2026-08-02)**: one is
   disposed of and one is deliberately not, and the task stays in `tasks/3_in-review/`
   because of the second. The continuation action asked an agent to finish PR #7's review
@@ -284,8 +300,8 @@ What is true today, mapped to the desired-state goals.
   touch a single live item", and an independent review had broken the fenced migration
   carve-out that would have allowed it — with every frozen field byte-identical and the
   reconciler clean, a rewrite could still change the question, invert a scope limit, delete
-  a choice, and flip the recommendation. Ten of the thirteen live human-attention files are
-  still in the format the owner rejected. So the promised re-review stays
+  a choice, and flip the recommendation. PR #56 left ten of the then-thirteen live
+  human-attention files in the format the owner rejected. Their migration remains pending, so the promised re-review stays
   `awaiting-artifact` with a pending binding rather than being published against PR #56:
   the artifact still missing is the countersigned migration of those live files, which is
   owner-gated twice over, by backlog task `2026-08-01-countersign-the-live-human-item-migration`
@@ -317,18 +333,18 @@ What is true today, mapped to the desired-state goals.
   The gate limitation recorded above is unchanged by any of this; what is resolved is the
   repair request, not the over-broad `task:<id>` merge boundary it was filed beside.
 - **Six task branches published after an unplanned machine stop (2026-08-02)**: a crash left
-  six branches in flight. Nothing was lost and every one is now on `origin` behind a pull
-  request — 65 through 70. Two carried uncommitted worktree changes that are now committed
+  six branches in flight. All six were published as PRs #65 through #70 and merged on
+  2026-08-03. Two carried uncommitted worktree changes that were committed
   with the design and verification records they lacked: the merge-ref bound's missing upper
   end (a bound above 2^63-1 made `[` report status 2, which `if` and `while` both read as
   false, so the step skipped its guard and every iteration and published an empty revision
   at exit 0) and the explanation-shape rule's imitation hole (a new agent item that copied
   one legacy field line from the single live legacy request switched the rule off for
-  itself). Three of the six show one red `reconcile-and-test`, all three the same stale-base
-  race and none of them the branch's own doing: on the identical commit the `push` and
-  `pull_request_target` events pass and only `pull_request` fails, at the step that reads a
-  `base.sha` GitHub has already moved past. That race is filed as
-  `2026-08-02-stop-a-stale-base-from-failing-the-reconciler-check` and is not repaired here.
+  itself). Three initially showed a red `reconcile-and-test` from the same stale-base
+  race: on an identical commit, `push` and `pull_request_target` passed while
+  `pull_request` read a `base.sha` GitHub had already moved past. That defect was later
+  repaired by task `2026-08-02-stop-a-stale-base-from-failing-the-reconciler-check`,
+  merged in PR #86 (`d9521c2`) on 2026-08-20.
 - **Archive tags are no longer laptop-local (2026-08-02)**: of the six archive tags the
   2026-08-02 branch-clearing session created to preserve retired branch content, only one
   had ever been pushed. All six are now on `origin`, together with eight new
@@ -349,22 +365,22 @@ What is true today, mapped to the desired-state goals.
   function of the queue files: no calendar date enters the output, because tracked bytes
   that depended on today would fail a tree nobody touched the morning a deadline passed.
   Lateness stays with the advisory `stale-queue` check, which is where it belongs.
-- **Five branches are one screened landing set (2026-08-16)**: every open branch is now
-  behind a pull request that merges cleanly in any order — 79, 82, 83, 85, and 86. Two were
-  unmergeable and one had never been published at all; the stale-base repair filed as
+- **Screened landing set (2026-08-16; merged by 2026-08-30)**: PRs #79, #82, #83,
+  #85, and #86 were screened together and have all merged. Two had been unmergeable
+  and one had never been published; the stale-base repair filed as
   `2026-08-02-stop-a-stale-base-from-failing-the-reconciler-check` had been finished and
   pushed on 2026-08-04 with its verification transcript, and sat unpublished for twelve
   days. `automation/integrate.py plan` found two colliding pairs that no single branch's
   green checks could have shown: the agent-instruction refactor and the bootstrap repair
   rewrite the same two contract paragraphs, and the bootstrap repair and the review-receipt
-  rebuild both regenerate `memory/index.md` and `message-queue/open-actions.md`. Both are
+  rebuild both regenerate `memory/index.md` and `message-queue/open-actions.md`. Both were
   resolved inside the branches, and a replay of the four green legs reported zero blocking
   findings at every merge transition with 16/16 test files at the end. Merge order also
-  decides `task-action-origin`: making a branch's history newly reachable turns its
-  intermediate commits into edges, so the review-receipt rebuild sits at the top of the set
-  rather than under it. That branch keeps one red merge-boundary check, owned by backlog
-  task `2026-08-08-stop-a-withdrawn-exemption-from-dirtying-past-edges`, and lands red by
-  the owner's instruction under the advisory-gate decision of 2026-08-02.
+  affected `task-action-origin`: making a branch's history newly reachable turned its
+  intermediate commits into edges, so the review-receipt rebuild was placed at the top
+  of the set. It retained one red merge-boundary check and landed under the owner's
+  advisory-gate decision. The underlying defect remains assigned to backlog task
+  `2026-08-08-stop-a-withdrawn-exemption-from-dirtying-past-edges`.
 - **Recovered human-question folds and retry diagnosis (2026-08-31)**: new human
   questions retain one sanctioned metadata fold below the answer. Genuine copied and
   filled templates pass without authoring comments inside the question. The byte guard
@@ -377,11 +393,12 @@ What is true today, mapped to the desired-state goals.
   a template, and the queue/handover raw-byte guard does not add an ADR integrity gate.
   The original task `2026-08-18-fold-the-queue-machine-record` retains its measured
   ADR-edit results in its verification record. This recovery does not resolve those limits.
-- **Open-PR recovery (2026-08-31)**: PR90 replaces the conflicting PR88 on current main;
-  PR91 carries source-evidence and unanswered-review repairs above it. Both replacement
+- **Merged PR recovery (2026-08-31)**: PR #90 replaced the conflicting PR #88;
+  PR #91 carried source-evidence and unanswered-review repairs above it. Both replacement
   code candidates passed the normal checks and independent native review before the old
-  PRs closed. Neither replacement is merged to main. The source inventory, original
-  staged-file list, actual verification and preserved decisions belong to recovery task
+  PRs closed. Both replacements merged to main on 2026-08-31 at `0c9387e`. The source
+  inventory, original staged-file list, actual verification and preserved decisions
+  belong to recovery task
   `2026-08-30-rebuild-the-open-pr-stack`. The external-vendor review has no result because
   execution security refused the proposed transmission; its sole authorization item
   withholds that external act, not Git publication or task completion.
