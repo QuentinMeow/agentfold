@@ -1,6 +1,6 @@
 # Desired state
 
-**Last-updated:** 2026-09-04
+**Last-updated:** 2026-09-25
 
 Where this repository is going, as goal entries copied from the goal template in
 `templates/` (`templates/README.md` maps it). Position is priority and `G<n>` is identity:
@@ -24,9 +24,12 @@ operations manual and the five disposable acceptance experiments from the owner'
 document (copied whole into the `requirements.md` of task
 `2026-08-03-plan-multi-worktree-safety-remediation`) recorded with real evidence. *(The
 development cycles are designed in task `2026-08-03-plan-multi-worktree-safety-remediation`
-(pull request #94); none of the five acceptance experiments has run; no operations manual
-exists yet; the restack false-accusation defect is under repair in task
-`2026-08-02-stop-a-restack-from-being-blamed-for-another-branchs-deletion`.)*
+(merged pull request #94); none of the five acceptance experiments has run; no operations
+manual exists yet. The inherited-deletion false accusation was repaired in completed task
+`2026-08-02-stop-a-restack-from-being-blamed-for-another-branchs-deletion`, merged in
+PR #97. The separate backlog task
+`2026-09-04-judge-inherited-queue-mutations-on-their-real-edges` covers inherited
+queue-mutation classification.)*
 
 ## G10 — Every task keeps the owner's words, labels what the agent added, and states its fit to a confirmed goal
 
@@ -40,10 +43,12 @@ here's the handoff from another agent. use highest agent teams (you can spin up 
 Done means every task folder holds the owner's words verbatim in `requirements.md`, every
 acceptance criterion says `[user <date>]` or `[derived]`, this file carries provenance and
 a confirmation state per goal, and a `core` or `service:` task states its fit before work,
-each refused by the reconciler when missing. *(In progress in task
-`2026-09-04-keep-owner-words-and-goal-fit-in-every-task`: the templates, the four
-reconciler checks, and this file's rewrite; the eight July goals below await the owner's
-confirmation.)*
+each refused by the reconciler when missing. *(Implemented for task IDs dated on or
+after 2026-09-04 in completed task
+`2026-09-04-keep-owner-words-and-goal-fit-in-every-task`, merged in PR #96. Older tasks
+receive advisory findings rather than retroactive enforcement; they have not all been
+backfilled. The templates, four reconciler checks, and goal provenance are live, and the
+owner confirmed all eight July goals on 2026-09-04.)*
 
 ## G1 — A stranger's agent can work here on first clone
 
@@ -89,8 +94,9 @@ Mounts remain optional adapters rather than the boundary.
 ```
 
 Done means the layered workspace design runs as repository-local tooling with observed
-evidence for each of its claims. *(Design proposed; the first read-only topology inspector
-is implemented, and later stages are specified but await coordination filing.)*
+evidence for each of its claims. *(The design and first read-only topology inspector
+are merged. All six follow-up tasks and their queue dependencies are filed; the
+manifest task remains blocked by its unresolved parent-review dependency.)*
 The owner confirmed this goal on 2026-09-04 with a reason in his own words: "G5 需要保留的，比如看我的 ~/code/job-finder-toolkit/." The repository meant is `~/code/jobs-finder-toolkit`, a public toolkit whose real data lives in a git-ignored `private/` overlay that is its own repository, guarded by a leak word list and an export script; this goal turns that hand-kept pattern into a checked module.
 
 ## G7 — The harness survives its own design review
