@@ -68,3 +68,11 @@ Append-only; newest at the bottom. One entry per session that touched this task.
   Returned the task to review only after this exact provider candidate passed.
 - Refreshed the stacked candidate once more after the parent published its immutable final
   handover; this records-only edge keeps #79 evaluated against the parent's final tip.
+
+
+## 2026-09-25 — close the merged task record (codex)
+
+- Independently checked the completed scope against the task, plan, historical evidence, and retained implementation. The six acceptance criteria are checked and supported by the preserved installer, real linked-worktree, concurrency, and failure-path transcripts. The current installer still separates common-repository and checkout-local setup.
+- Confirmed PR79 is represented by merge commit `3f9ee8920510f7a72c7a979828a3981adbecbd68`, an ancestor of the audit baseline. Moved this task from `3_in-review` to `4_done`; no implementation behavior changes in this records-only closeout.
+- The non-blocking GitHub issue 74 projection remains linked and open; completion does not release its provider source.
+- Preserved all existing requirements, claimant text, acceptance criteria, queue links, and historical evidence. The new verification entry proves merge ancestry; it does not claim historical test logs verify today's code.

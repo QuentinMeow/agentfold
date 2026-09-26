@@ -30,3 +30,11 @@
 - Five independent native lenses accepted the final code candidate. Their exact reports are in `review-evidence/`; the per-method regression map captures relevant observed-red controls without deleting original tests.
 - GitHub reported both replacement code candidates mergeable with clean hosted checks. The original PR89 was closed after that verification. This task remains in review on PR91, based on the lower recovery branch; main is unchanged. Closing-record commits still pass normal hooks and refreshed hosted checks.
 - Current-main completed-task moves, frozen questions, human responses, original commit history and the review retraction/publication sequence remain intact. The original owner checkout retains its unfinished staged merge. The parent task records the separate external-review limitation; no unapproved Claude execution occurred.
+
+
+## 2026-09-25 — close the merged task record (codex)
+
+- Independently checked the completed scope against the task, plan, historical evidence, and retained implementation. The six acceptance criteria are checked and supported by the preserved captured-source, quote-boundary, exact-successor, regression-control, two-interpreter, cold-clone, range, and native-review evidence. The recovered upper implementation is now in main.
+- Confirmed PR91 is represented by merge commit `0c9387ef8d5cd973fac6c80fd94e95da61db0c8e`, an ancestor of the audit baseline. Moved this task from `3_in-review` to `4_done`; no implementation behavior changes in this records-only closeout.
+- The recorded platform skips, literal-prefix ambiguity, advisory citation policy, and external-review limitation remain unchanged. No frozen question or human response is edited.
+- Preserved all existing requirements, claimant text, acceptance criteria, queue links, and historical evidence. The new verification entry proves merge ancestry; it does not claim historical test logs verify today's code.

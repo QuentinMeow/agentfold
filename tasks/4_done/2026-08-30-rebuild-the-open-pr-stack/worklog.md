@@ -38,3 +38,11 @@ Append-only; newest at the bottom. One entry per session that touched this task.
 - Both replacement code candidates were published and GitHub reported them mergeable with clean checks before the original PRs were closed. The stack remains open, with the upper branch based on this lower task branch. Closing record changes still pass through ordinary hooks and refreshed hosted checks.
 - The original owner branch, 79 staged records, 718-entry index, unfinished merge metadata, probes and backups remain intact. No independent implementation was imported from discarded local experiments.
 - The separate external review did not run: execution security refused transmission before Claude started. Its canonical question withholds only that external operation. The plan records this limit rather than claiming an unavailable cross-vendor result.
+
+
+## 2026-09-25 — close the merged task record (codex)
+
+- Independently checked the completed scope against the task, plan, historical evidence, and retained implementation. The five acceptance criteria are checked. The preserved inventory, disposition records, lower-layer transcripts, cold-clone checks, exact-range checks, and native review reports support the delivered recovery scope. The replacement stack has since merged.
+- Confirmed PR90, delivered by the PR91 merge is represented by merge commit `0c9387ef8d5cd973fac6c80fd94e95da61db0c8e`, an ancestor of the audit baseline. Moved this task from `3_in-review` to `4_done`; no implementation behavior changes in this records-only closeout.
+- The external Claude review remains unexecuted and its authorization decision remains linked and open. This closeout neither sends review inputs nor converts native reviews into a cross-vendor verdict; it makes no fresh claim about the old dirty owner checkout.
+- Preserved all existing requirements, claimant text, acceptance criteria, queue links, and historical evidence. The new verification entry proves merge ancestry; it does not claim historical test logs verify today's code.
